@@ -1,0 +1,49 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+dist/
+
+# Go workspace
+go.work
+go.work.sum
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Dependencies (vendored code should be committed only if deliberately vendored)
+# vendor/
+
+# Logs
+*.log
+logs/
+
+# Test / coverage
+coverage.txt
+coverage.html
+*.prof
+
+# Eval / load-test artifacts
+eval-report.json
+load-test-results/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local infrastructure data (docker compose volumes)
+.postgres-data/
+.minio-data/
