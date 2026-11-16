@@ -22,8 +22,18 @@ $$;
 -- +goose StatementEnd
 
 -- The migrating role (`migrator` on Cloud SQL) must be a member of app_system
--- to hand function ownership to it. `app` is never a member.
-GRANT app_system TO CURRENT_USER;
+-- to hand function ownership to it. `app` is never a member. On Cloud SQL the
+-- membership already exists (scripts/cloudsql-bootstrap.sql); superusers are
+-- implicitly members. Grant only when missing, so a re-grant never fails.
+-- +goose StatementBegin
+DO $$
+BEGIN
+  IF NOT pg_has_role(current_user, 'app_system', 'MEMBER') THEN
+    EXECUTE format('GRANT app_system TO %I', current_user);
+  END IF;
+END
+$$;
+-- +goose StatementEnd
 
 GRANT USAGE ON SCHEMA public TO app_system;
 GRANT SELECT ON memberships TO app_system;

@@ -73,12 +73,14 @@ target.
 
 ## 4. CI/CD — Cloud Build
 
-`cloudbuild.yaml`, triggered on every push and pull request:
+`cloudbuild.yaml`, run by two triggers: **branches** (every push except `main`; checks only) and
+**main** (checks, then push, migrate and deploy):
 
 1. `go vet ./...`, lint
 2. `go test ./...` and `go test -race ./...`
-3. Integration tests with testcontainers (Cloud Build steps can run Docker; prove this early with
-   one Postgres test and pin the networking setup that works)
+3. Integration tests against a Postgres container started on the `cloudbuild` network and reached
+   by name through `TEST_DATABASE_URL` (testcontainers' port mapping is unreliable inside Cloud
+   Build steps; on the workstation the same tests use testcontainers)
 4. Build images → Artifact Registry (tagged with the commit SHA)
 5. *(main branch only)* Run migrations as a Cloud Run job in **dev**
 6. *(main branch only)* Deploy `api`, `worker`, `outbox-relay` to **dev**
@@ -128,9 +130,10 @@ cross-tenant path uses role-scoped policies instead (see
 [system-design.md §1](system-design.md#cross-tenant-system-paths)). `app` must never be a member of
 `app_system` — the isolation suite checks it.
 
-The migrations create the `app` and `app_system` roles, so `migrator` needs `CREATEROLE` (grant it
-once from the built-in `postgres` user during bootstrap). The migrate job then adds the IAM users
-listed in `APP_DB_LOGIN_ROLES` to `app`.
+Cloud SQL IAM users cannot create roles, so a one-time script run as the built-in `postgres` user
+([scripts/cloudsql-bootstrap.sql](../scripts/cloudsql-bootstrap.sql)) creates `app` and `app_system` and
+grants both to `migrator` `WITH ADMIN OPTION`. The migrations then skip role creation, and the migrate
+job adds the IAM users listed in `APP_DB_LOGIN_ROLES` (api, worker, relay) to `app`.
 
 **Dev cost control:** the dev instance uses a small machine tier and can be stopped outside
 working hours (Terraform variable or a scheduled job).
@@ -173,13 +176,29 @@ working hours (Terraform variable or a scheduled job).
 
 ## 11. Bootstrap order (first time)
 
-1. Create the dev project, link billing, set a budget alert.
-2. Apply `deployments/terraform/bootstrap` (state bucket, Artifact Registry, Cloud Build trigger,
-   workstation cluster + config).
-3. Start a workstation, clone the repo, `make up && make test`.
-4. Apply `deployments/terraform/env/dev` (VPC, Cloud SQL, bucket, service accounts, Cloud Run).
-5. Push to `main` → Cloud Build migrates and deploys dev.
-6. Repeat 4–5 for `test` and `prod` with their own variables.
+Steps 1–4 run in **Cloud Shell** (browser; it already has `gcloud` and Terraform), so the laptop
+still needs nothing installed.
+
+1. Create the dev project, link billing, set a budget alert. Create the Terraform state bucket:
+   `gcloud storage buckets create gs://<project>-tfstate --location=<region> --uniform-bucket-level-access --public-access-prevention`.
+2. Connect the GitHub repository to Cloud Build once in the console (Cloud Build → Triggers →
+   Connect repository); the triggers in step 3 refer to it.
+3. Apply `deployments/terraform/bootstrap` (APIs, VPC + private services access, Artifact
+   Registry, `sa-build` + triggers, workstation cluster + config):
+   `terraform init -backend-config=bucket=<project>-tfstate -backend-config=prefix=bootstrap`, then
+   `terraform apply` with a `terraform.tfvars` copied from the `.example` file. The VPC lives here,
+   not in `env/dev`, because the workstation and Cloud SQL must share it.
+4. Build the workstation image:
+   `gcloud builds submit --config deployments/workstation/cloudbuild.yaml --substitutions=_REGION=<region> deployments/workstation`.
+5. Start a workstation from the `go-dev` config, clone the repo, run `make tidy` and commit
+   `go.sum`, then `make up && make test && make itest`.
+6. Apply `deployments/terraform/env/dev` (Cloud SQL, bucket, runtime service accounts + IAM
+   database users, JWT secret, Cloud Run `api` service and `migrate` job), with
+   `-backend-config=prefix=env/dev`.
+7. Run [scripts/cloudsql-bootstrap.sql](../scripts/cloudsql-bootstrap.sql) once in Cloud SQL Studio
+   as `postgres` (roles for `migrator`, pgvector version check).
+8. Push to `main` → Cloud Build tests, pushes images, runs the migrate job, and deploys `api` to dev.
+9. Repeat 3, 6–8 for `test` and `prod` with their own projects and variables.
 
 This sequence is the documented setup referenced by the Milestone 5 exit criterion.
 

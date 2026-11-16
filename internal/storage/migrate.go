@@ -30,7 +30,7 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 func GrantAppRole(ctx context.Context, db *sql.DB, logins []string) error {
 	for _, login := range logins {
 		stmt := "GRANT app TO " + pgx.Identifier{login}.Sanitize()
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
+		if _, err := db.ExecContext(ctx, stmt); err != nil { //nolint:gosec // identifier is quoted with pgx.Identifier.Sanitize; GRANT cannot take a bind parameter
 			return fmt.Errorf("storage: %s: %w", stmt, err)
 		}
 	}

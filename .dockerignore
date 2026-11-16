@@ -1,0 +1,9 @@
+.git
+.gocache
+.gomodcache
+*.pdf
+docs
+specs
+deployments
+bin
+dist

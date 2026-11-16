@@ -1,0 +1,18 @@
+# Builds the Cloud Workstations image. Run from Cloud Shell in the repo root:
+#   gcloud builds submit --config deployments/workstation/cloudbuild.yaml \
+#     --substitutions=_REGION=<region> deployments/workstation
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: app
+options:
+  logging: CLOUD_LOGGING_ONLY
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/workstation:latest
+      - .
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/workstation:latest
+timeout: 1800s

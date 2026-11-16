@@ -1,0 +1,116 @@
+# CI/CD (docs/gcp-environment.md §4). Two triggers use this file
+# (deployments/terraform/bootstrap):
+#   branches  - push to any branch except main  → _DEPLOY=false (checks only)
+#   main      - push to main                    → _DEPLOY=true  (checks, push, migrate, deploy dev)
+#
+# Integration tests use a Postgres container started on the `cloudbuild`
+# network and reached by name (TEST_DATABASE_URL), instead of testcontainers'
+# port mapping, which is unreliable inside Cloud Build steps.
+
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: app
+  _DEPLOY: "false"
+  _PG_IMAGE: pgvector/pgvector:pg17
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+  env:
+    - GOMODCACHE=/workspace/.gomodcache
+    - GOCACHE=/workspace/.gocache
+    - GOFLAGS=-mod=readonly
+
+steps:
+  - id: modules
+    name: golang:1.25
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        test -f go.sum || { echo "go.sum missing: run 'make tidy' on a workstation and commit go.sum"; exit 1; }
+        go mod download
+        go mod tidy -diff
+
+  - id: vet
+    name: golang:1.25
+    waitFor: [modules]
+    args: [go, vet, -tags, integration, ./...]
+
+  - id: lint
+    name: golangci/golangci-lint:v2.5.0
+    waitFor: [modules]
+    args: [golangci-lint, run, --build-tags, integration, ./...]
+
+  - id: unit
+    name: golang:1.25
+    waitFor: [modules]
+    args: [go, test, -race, -count=1, ./...]
+
+  - id: postgres
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        docker run -d --name pg --network cloudbuild \
+          -e POSTGRES_PASSWORD=postgres ${_PG_IMAGE}
+        for i in $(seq 1 60); do
+          docker exec pg pg_isready -U postgres -h 127.0.0.1 && exit 0
+          sleep 1
+        done
+        docker logs pg
+        exit 1
+
+  - id: integration
+    name: golang:1.25
+    waitFor: [modules, postgres]
+    env:
+      - TEST_DATABASE_URL=postgres://postgres:postgres@pg:5432/postgres?sslmode=disable
+    args: [go, test, -race, -count=1, -tags, integration, ./tests/..., ./internal/...]
+
+  - id: images
+    name: gcr.io/cloud-builders/docker
+    waitFor: [vet, lint, unit, integration]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        repo=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}
+        for bin in api worker outbox-relay migrate; do
+          docker build --build-arg BIN=$bin -t $repo/$bin:${COMMIT_SHA} .
+          if [ "${_DEPLOY}" = "true" ]; then docker push $repo/$bin:${COMMIT_SHA}; fi
+        done
+
+  - id: migrate-dev
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [images]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        [ "${_DEPLOY}" = "true" ] || { echo "not main: skipping migrate"; exit 0; }
+        gcloud run jobs update migrate --region=${_REGION} \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/migrate:${COMMIT_SHA}
+        gcloud run jobs execute migrate --region=${_REGION} --wait
+
+  # worker and outbox-relay are stubs until specs 004/006; they are built and
+  # pushed above but not deployed yet.
+  - id: deploy-api-dev
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [migrate-dev]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        [ "${_DEPLOY}" = "true" ] || { echo "not main: skipping deploy"; exit 0; }
+        gcloud run services update api --region=${_REGION} \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/api:${COMMIT_SHA}
+
+timeout: 2400s
