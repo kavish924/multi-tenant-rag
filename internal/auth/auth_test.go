@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -125,7 +126,7 @@ func TestTokenRejections(t *testing.T) {
 		"no exp":       {tk, noExpRaw},
 	}
 	for name, c := range cases {
-		if _, err := c.v.Verify(c.raw); err != ErrInvalidToken {
+		if _, err := c.v.Verify(c.raw); !errors.Is(err, ErrInvalidToken) {
 			t.Errorf("%s: got %v, want ErrInvalidToken", name, err)
 		}
 	}

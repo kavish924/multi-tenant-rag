@@ -32,31 +32,31 @@ Reference: [gcp-environment.md](gcp-environment.md) §2–§4 and §11.
 
 - [ ] Dev project created, billing linked, **budget + alerts** set
 - [ ] Terraform state bucket; `deployments/terraform/bootstrap` applied
-- [ ] Artifact Registry repository
+- [ ] Artifact Registry repository *(Terraform written: `bootstrap`)*
 - [ ] Cloud Workstations cluster + config (custom image from `deployments/workstation/Dockerfile`:
       Go, Docker, `gcloud`, Terraform, `psql`, migration CLI, linter); **idle timeout set**
 - [ ] Workstation started; repo cloned; GitHub connected
-- [ ] Cloud Build trigger on push / pull request
+- [ ] Cloud Build trigger on push / pull request *(Terraform written: `bootstrap`)*
 - [ ] **Spike:** one testcontainers Postgres test passes in Cloud Build (pin the networking
-      setup that works)
+      setup that works) *(replaced: Cloud Build runs a named Postgres container + `TEST_DATABASE_URL`)*
 - [ ] Check Cloud SQL's available `pgvector` version (≥ 0.8 needed for iterative scans,
       [007](../specs/007-hybrid-retrieval/requirements.md) RET-REQ-007)
 
 ## Phase 2 — Repository skeleton
 
-- [ ] `go.mod`; `cmd/api`, `cmd/worker`, `cmd/outbox-relay`, `cmd/migrate` with `main.go` stubs
+- [x] `go.mod`; `cmd/api`, `cmd/worker`, `cmd/outbox-relay`, `cmd/migrate` with `main.go` stubs
 - [ ] `internal/` package layout per [system-architecture.md](system-architecture.md#internal-package-layout)
-- [ ] Config loading from env; health endpoint on `api`
-- [ ] `Makefile`: `up`, `down`, `migrate`, `test`, `itest`, `lint`, `run-api`, `run-worker`
-- [ ] `deployments/compose.yaml` (workstation only): `pgvector/pgvector`, `fake-gcs-server`,
+- [x] Config loading from env; health endpoint on `api`
+- [x] `Makefile`: `up`, `down`, `migrate`, `test`, `itest`, `lint`, `run-api`, `run-worker`
+- [x] `deployments/compose.yaml` (workstation only; postgres now, fake-gcs and otel with 003/010): `pgvector/pgvector`, `fake-gcs-server`,
       `otel-collector`
-- [ ] Dockerfiles (minimal base image) for each binary
-- [ ] `cloudbuild.yaml`: vet → lint → `go test` → `go test -race` → integration → build → push
-- [ ] Linter config; `migrations/` directory wired to the chosen tool
-- [ ] `deployments/terraform/env/dev`: VPC, Cloud SQL (private IP, IAM auth), documents bucket,
+- [x] Dockerfiles (minimal base image) for each binary
+- [x] `cloudbuild.yaml`: vet → lint → `go test` → `go test -race` → integration → build → push
+- [x] Linter config; `migrations/` directory wired to the chosen tool
+- [ ] *(written, not applied)* `deployments/terraform/env/dev`: VPC, Cloud SQL (private IP, IAM auth), documents bucket,
       service accounts (`sa-api`, `sa-worker`, `sa-relay`, `sa-migrate`, `sa-build`), Secret
       Manager JWT key, Cloud Run `api` service, `migrate` job
-- [ ] Cloud Build on `main`: migrate job → deploy `api` to dev
+- [ ] *(written, not run)* Cloud Build on `main`: migrate job → deploy `api` to dev
 
 ---
 

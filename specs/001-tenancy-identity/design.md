@@ -57,7 +57,8 @@ ownership); `app` is never a member of `app_system`:
 
 ```sql
 CREATE ROLE app_system NOLOGIN;
-GRANT app_system TO CURRENT_USER;  -- the migrating role (`migrator` on Cloud SQL)
+-- the migrating role must be a member (granted once on Cloud SQL by scripts/cloudsql-bootstrap.sql;
+-- the migration grants it only when missing)
 GRANT SELECT ON memberships TO app_system;
 CREATE POLICY system_access ON memberships TO app_system USING (true);
 
