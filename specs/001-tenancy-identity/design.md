@@ -41,8 +41,8 @@ CREATE TABLE memberships (
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;  -- and every tenant-owned table
 ALTER TABLE documents FORCE  ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON documents
-  USING      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING      (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
 ```
 
 A dedicated `app` DB role (no superuser, non-owner) is created in `0002_rls.sql`; the API and
@@ -57,13 +57,13 @@ ownership); `app` is never a member of `app_system`:
 
 ```sql
 CREATE ROLE app_system NOLOGIN;
-GRANT app_system TO migrator;
+GRANT app_system TO CURRENT_USER;  -- the migrating role (`migrator` on Cloud SQL)
 GRANT SELECT ON memberships TO app_system;
 CREATE POLICY system_access ON memberships TO app_system USING (true);
 
 CREATE FUNCTION memberships_for_user(p_user uuid)
 RETURNS TABLE (tenant_id uuid, role text)
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
   SELECT m.tenant_id, m.role FROM memberships m WHERE m.user_id = p_user;
 $$;
 ALTER FUNCTION memberships_for_user(uuid) OWNER TO app_system;

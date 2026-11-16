@@ -27,7 +27,7 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 
 | Spec | Feature | Milestone | Status |
 | ---- | ------- | --------- | ------ |
-| [001](./001-tenancy-identity/) | Tenancy & identity | 1 — Working Go API | Draft |
+| [001](./001-tenancy-identity/) | Tenancy & identity | 1 — Working Go API | In progress |
 | [002](./002-document-management/) | Document management | 1 — Working Go API | Draft |
 | [003](./003-object-storage/) | Object storage | 2 — Async ingestion | Draft |
 | [004](./004-job-queue/) | Job queue (PostgreSQL) | 2 — Async ingestion | Draft |

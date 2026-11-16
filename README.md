@@ -47,6 +47,9 @@ tenant-prefixed object storage. Guardrails fail closed; the model is not a secur
 
 ## Status
 
-Planning/documentation phase — specs are `Draft`. Implementation follows
-[`specs/README.md`](specs/README.md) milestone order, starting with
-[spec 001 — Tenancy & Identity](specs/001-tenancy-identity/).
+Implementation has started with [spec 001 — Tenancy & Identity](specs/001-tenancy-identity/)
+(in progress); the remaining specs are `Draft` and follow the
+[`specs/README.md`](specs/README.md) milestone order.
+
+On a Cloud Workstation: `make tidy` (writes `go.sum`), `make test`, `make itest` (Docker), or
+`make up dev-login migrate run-api` for a local API against the compose database.

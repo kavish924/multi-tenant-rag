@@ -1,7 +1,7 @@
 # 001 — Tenancy & Identity: Requirements
 
 - **Spec ID:** 001 `TEN`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 1 — Working Go API
 - **Depends on:** none
 - **Shared context:** `docs/system-design.md §1` (multi-tenancy model)

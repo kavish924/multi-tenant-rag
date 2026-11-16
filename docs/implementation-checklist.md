@@ -20,9 +20,9 @@
 - [ ] **Vertex AI embedding model** chosen → `EMBEDDING_DIM` fixed; `vector` (≤ 2,000 dims) vs
       `halfvec` (≤ 4,000) decided ([005 design §10](../specs/005-ingestion-pipeline/design.md))
 - [ ] Vertex AI generation model chosen
-- [ ] Go version pinned; HTTP router (`net/http` mux or `chi`); `sqlc` yes/no
-- [ ] Migration tool (`goose` or `golang-migrate`)
-- [ ] JWT algorithm (HS256 or EdDSA) — key lives in Secret Manager
+- [x] Go version pinned; HTTP router (`net/http` mux or `chi`); `sqlc` yes/no → Go 1.25, standard `net/http` mux, no `sqlc` (hand-written pgx)
+- [x] Migration tool (`goose` or `golang-migrate`) → `goose` v3, migrations embedded and run by `cmd/migrate`
+- [x] JWT algorithm (HS256 or EdDSA) — key lives in Secret Manager → HS256, `JWT_SIGNING_KEY` ≥ 32 bytes
 - [ ] Tokenizer library for chunking ([005 design §10](../specs/005-ingestion-pipeline/design.md))
 - [ ] Specs **001** and **002** reviewed and marked **Approved**
 
