@@ -2,7 +2,7 @@
 
 ## Group 1: Plumbing
 
-- [ ] 1.1 `internal/observability.Setup` for api/worker; OTLP exporter; compose `otel-collector`, `prometheus`, `grafana` services. (OBS-REQ-001)
+- [ ] 1.1 `internal/observability.Setup` for api/worker; OTLP exporter; collector sidecar on Cloud Run (Cloud Trace + Managed Prometheus exporters); compose `otel-collector` on the workstation. (OBS-REQ-001)
 - [ ] 1.2 Request middleware: request id + root span + `X-Request-Id` echo. (OBS-REQ-001, OBS-AC-001)
 - [ ] 1.3 Trace context injection into job payloads; worker parent extraction. (OBS-REQ-003, OBS-AC-002)
 
@@ -16,7 +16,7 @@
 ## Group 3: Logs and dashboards
 
 - [ ] 3.1 slog JSON wrapper: correlation ids; redaction guard (no doc text/secrets) + automated log-scan test. (OBS-REQ-006, OBS-AC-004)
-- [ ] 3.2 Grafana dashboards per OBS-NFR-002 (JSON provisioned in repo). (OBS-NFR-002)
+- [ ] 3.2 Cloud Monitoring dashboards per OBS-NFR-002 (Terraform, JSON in repo). (OBS-NFR-002)
 - [ ] 3.3 Collector-down resilience test (non-blocking). (OBS-AC-006)
 
 ## Group 4: Verification

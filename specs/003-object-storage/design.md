@@ -6,11 +6,11 @@
 ## 1. Context and goals
 
 Isolation layer 3 lives here: tenant-prefixed keys + authorization before any signed URL.
-Also the seam that keeps dev (MinIO) and prod (S3) identical.
+Also the seam that keeps tests (`fake-gcs-server`) and every environment (Cloud Storage) identical.
 
 ## 2. Scope
 
-**In:** `ObjectStore` interface, MinIO implementation, key builder, content endpoint wiring,
+**In:** `ObjectStore` interface, Cloud Storage implementation, key builder, content endpoint wiring,
 worker fetch path. **Out:** upload validation (`002`), cleanup jobs (`013`).
 
 ## 3. Components
@@ -30,7 +30,10 @@ func DocumentKey(tenantID, documentID uuid.UUID) string {
 }
 ```
 
-- MinIO impl via `minio-go`; S3 impl via same SDK (endpoint switch). Docker Compose service `minio`.
+- Cloud Storage impl via `cloud.google.com/go/storage` (service-account auth; `Presign` →
+  `SignedURL` with `SigningSchemeV4`, signed through IAM `signBlob` so no key file exists).
+  Tests run it against `fake-gcs-server` via `STORAGE_EMULATOR_HOST` (compose service `gcs` on
+  the workstation; testcontainers in CI). Bucket created by Terraform, not by the app.
 
 ## 4. Data model changes
 
@@ -39,7 +42,7 @@ None (documents.object_key already stored by `002`; always produced by `Document
 ## 5. API contract
 
 - `GET /documents/{id}/content` — membership-checked; streams `Content-Type` + `Content-Length`
-  from DB metadata; `?redirect=true` → 302 to presigned URL (TTL ≤ 5 min, STO-AC-003).
+  from DB metadata; `?redirect=true` → 302 to a V4 signed URL (TTL ≤ 5 min, STO-AC-003).
 
 ## 6. Key flows
 
@@ -51,23 +54,24 @@ cross-tenant) → checks `deleted_at` (410) → server-side stream by default.
 
 | Failure | Detection | Response |
 | ------- | --------- | -------- |
-| Object missing but row exists | NoSuchKey | 404 + log (inconsistency signal) |
+| Object missing but row exists | `storage.ErrObjectNotExist` | 404 + log (inconsistency signal) |
 | Storage unreachable | client error | 502 |
 | Presign failure | error | 500 |
 
 ## 8. Security and multi-tenancy
 
 Single key-builder function (STO-AC-004) makes tenant-mismatched keys unrepresentable.
-Bucket policy: no public access; presigned GET only. URLs are short-lived; reuse-across-tenant
+Bucket: uniform bucket-level access, public access prevention enforced; signed GET only. URLs are short-lived; reuse-across-tenant
 test proves the boundary (STO-AC-005).
 
 ## 9. Testing strategy
 
-- Integration (testcontainers MinIO): put/get/delete round-trip; idempotent delete (STO-AC-006);
+- Integration (testcontainers `fake-gcs-server`): put/get/delete round-trip; idempotent delete (STO-AC-006);
   streaming large object (STO-NFR-001).
-- Security: content endpoint authz matrix (STO-AC-001/002); presign TTL + membership precondition
+- Security: content endpoint authz matrix (STO-AC-001/002); signed-URL TTL + membership precondition
   (STO-AC-003); key-builder unit test (STO-AC-004).
 
 ## 10. Open questions
 
-- Multipart upload for very large files → **default:** not needed at 50 MB cap; revisit if cap raises.
+- Resumable upload for very large files → **default:** not needed at 50 MB cap; revisit if cap raises.
+- `fake-gcs-server` does not verify V4 signatures → signed-URL expiry/tamper tests (STO-AC-005) run against the real dev bucket in Cloud Build, not the emulator.

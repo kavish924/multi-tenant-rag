@@ -71,9 +71,20 @@ zero rows. Do **not** fix this by giving the `app` role `BYPASSRLS` or by loosen
 
 Instead, expose each one as a narrow **system function**:
 
-- `SECURITY DEFINER`, owned by a dedicated `app_system` role (`NOLOGIN BYPASSRLS`), with
+- `SECURITY DEFINER`, owned by a dedicated `app_system` role (`NOLOGIN`), with
   `SET search_path = pg_catalog, public`.
-- `EXECUTE` granted to `app`; nothing else about `app_system` is reachable.
+- `app_system` does **not** have `BYPASSRLS` (managed Postgres such as Cloud SQL has no true
+  superuser to grant it). It sees across tenants only through policies scoped to that role:
+
+  ```sql
+  -- one per table a system function touches (jobs, memberships, outbox, documents)
+  CREATE POLICY system_access ON jobs TO app_system USING (true) WITH CHECK (true);
+  ```
+
+  The `tenant_isolation` policy still applies to `app`; Postgres combines permissive policies
+  per role, so `app` never matches `system_access`.
+- `EXECUTE` granted to `app`; `app` is **not** a member of `app_system` (so it cannot
+  `SET ROLE` to it), and nothing else about `app_system` is reachable.
 - Returns only the columns the caller needs (ids, never document text).
 - Everything after the function call (processing the job, reading the document) goes back
   through `WithTenant(tenantID)`.
@@ -120,8 +131,9 @@ erDiagram
 | ----------- | ---------------------------------------------------------------------------------------------------------- |
 | `documents` | Partial unique `(tenant_id, sha256) WHERE deleted_at IS NULL` — per-tenant duplicate detection that still allows re-uploading a deleted file. `status` CHECK: `uploaded`, `queued`, `processing`, `indexed`, `failed`, `deleting`, `deleted`. Soft delete sets `deleted_at` and `deleting` atomically; `deleted_at IS NOT NULL` is sticky — no pipeline write may change the status afterwards. |
 | `chunks`    | `UNIQUE (document_id, ordinal)` — **makes retries idempotent**. `tsv` is a generated column
-(`to_tsvector('english', content)`). `embedding vector(1536)` must match the embedding model's
-dimension. `embed_model` recorded for future re-embedding. |
+(`to_tsvector('english', content)`). `embedding vector(EMBEDDING_DIM)` must match the chosen
+Vertex AI embedding model's output size (HNSW: `vector` ≤ 2,000 dims, `halfvec` ≤ 4,000).
+`embed_model` recorded for future re-embedding. |
 | Indexes     | `hnsw (embedding vector_cosine_ops)` for ANN, `gin (tsv)` for full text, `(tenant_id, document_id)` for scoped access. |
 | `jobs`      | `UNIQUE (tenant_id, idempotency_key)`; lease columns (`lease_expires_at`, `locked_by`) for crash recovery; `attempts` / `max_attempts` for bounded retries. |
 | `outbox`    | `published_at` nullable; relay marks rows published.                                                        |

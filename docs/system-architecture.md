@@ -32,17 +32,17 @@ flowchart LR
     end
 
     subgraph State
-        PG[(PostgreSQL + pgvector<br/>tenants · documents · chunks<br/>jobs · outbox · usage_events)]
-        S3[(Object storage MinIO / S3<br/>tenants/tenant_id/documents/...)]
+        PG[(Cloud SQL PostgreSQL + pgvector<br/>tenants · documents · chunks<br/>jobs · outbox · usage_events)]
+        S3[(Cloud Storage<br/>tenants/tenant_id/documents/...)]
     end
 
     subgraph Providers
-        EMB[Embedding provider]
-        LLM[LLM provider]
+        EMB[Embedding provider<br/>Vertex AI]
+        LLM[LLM provider<br/>Vertex AI]
     end
 
     subgraph Telemetry
-        OT[OTel collector] --> PROM[Prometheus] --> GRAF[Grafana]
+        OT[OTel collector sidecar] --> PROM[Cloud Trace · Managed Prometheus] --> GRAF[Cloud Monitoring]
     end
 
     C -->|HTTPS upload / ask| API
@@ -174,7 +174,10 @@ contexthub/
 ├── api/
 │   └── openapi.yaml
 ├── deployments/
-│   └── docker-compose.yml
+│   ├── compose.yaml          # workstation-only test stack (postgres, fake-gcs-server, otel)
+│   ├── workstation/          # Cloud Workstations image (Dockerfile)
+│   └── terraform/            # bootstrap + env/{dev,test,prod}
+├── cloudbuild.yaml
 ├── tests/
 │   ├── integration/
 │   ├── isolation/
@@ -192,18 +195,24 @@ This is a suggested layout, not a requirement to create every directory on day o
 organized around **responsibilities** rather than one big `main.go`. Interfaces stay small —
 the RAG application depends on an embedding interface rather than a particular provider's SDK.
 
-## Deployment view (Docker Compose)
+## Deployment view (Google Cloud)
 
-| Container       | Role                                       |
-| --------------- | ------------------------------------------ |
-| `api`           | Stateless; scale horizontally behind LB.   |
-| `worker`        | Stateless; bounded pool per instance; scale by queue depth. |
-| `outbox-relay`  | Single active instance is sufficient early.|
-| `postgres`      | Single stateful core (pgvector image).     |
-| `minio`         | Object storage for dev; S3 in production.  |
-| `otel-collector`, `prometheus`, `grafana` | Telemetry pipeline. |
+Everything runs on GCP, one project per environment (dev / test / prod). Full details, IAM, and
+bootstrap steps: [gcp-environment.md](gcp-environment.md).
 
-Graceful shutdown: workers finish in-flight jobs (`sync.WaitGroup`) and rely on lease expiry
+| Component       | GCP service                  | Role                                       |
+| --------------- | ---------------------------- | ------------------------------------------ |
+| `api`           | Cloud Run service            | Stateless; autoscales on request load; SSE streaming. |
+| `worker`        | Cloud Run worker pool        | Stateless; bounded pool per instance; scale by queue depth/age. |
+| `outbox-relay`  | Cloud Run worker pool (1 instance) | Single active instance is sufficient early. |
+| `migrate`       | Cloud Run job                | Applies migrations inside the VPC before each deploy. |
+| Database        | Cloud SQL for PostgreSQL + pgvector | Single stateful core; private IP; IAM auth. |
+| Files           | Cloud Storage                | One bucket per environment; tenant-prefixed keys. |
+| Models          | Vertex AI                    | Embeddings + generation behind provider interfaces. |
+| Telemetry       | OTel collector sidecar → Cloud Trace, Managed Prometheus, Cloud Monitoring, Cloud Logging | Traces, metrics, dashboards, logs. |
+| Dev / CI        | Cloud Workstations, Cloud Build, Artifact Registry | No local installs; same image digest promoted dev → test → prod. |
+
+Graceful shutdown: on Cloud Run's `SIGTERM`, workers stop claiming, finish in-flight jobs (`sync.WaitGroup`) and rely on lease expiry
 for anything abandoned, so restarting a worker never corrupts document state.
 
 ## Scaling & failure independence
@@ -213,11 +222,12 @@ for anything abandoned, so restarting a worker never corrupts document state.
   capacity.
 - **Postgres** is the shared core — the first real bottleneck and the first thing to monitor
   (queue depth, lock waits, ANN recall).
-- A broker (Kafka/NATS) can replace the in-Postgres queue later via the transactional outbox,
+- A broker (Pub/Sub) can replace the in-Postgres queue later via the transactional outbox,
   with consumers staying idempotent.
 
 ## Related docs
 
+- [GCP Environment](gcp-environment.md) — workstations, CI/CD, Cloud Run, Cloud SQL roles, costs
 - [Architecture Diagrams](diagrams/architecture.md) — visual reference: context, containers, sequence paths, state machines, deployment, trust boundaries
 - [Technology Stack](tech-stack.md) — tools, rationale, swap points
 - [System Design](system-design.md) — data model, tenancy, pipeline, retrieval, guardrails

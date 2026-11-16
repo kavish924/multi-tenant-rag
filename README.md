@@ -12,6 +12,7 @@ retrieval quality, cost control, and being able to explain what the system did o
 | Doc | Contents |
 | --- | -------- |
 | [docs/tech-stack.md](docs/tech-stack.md) | Technology choices, rationale, swap points |
+| [docs/gcp-environment.md](docs/gcp-environment.md) | Google Cloud setup: Cloud Workstations, Cloud Build, Cloud Run, Cloud SQL roles, costs |
 | [docs/system-architecture.md](docs/system-architecture.md) | Binaries, write/read paths, deployment view |
 | [docs/system-design.md](docs/system-design.md) | Tenancy (RLS), data model, pipeline, retrieval, guardrails |
 | [docs/diagrams/architecture.md](docs/diagrams/architecture.md) | Mermaid diagrams: context, containers, sequences, states, trust boundaries |
@@ -37,7 +38,9 @@ before its spec is approved.
 - **`cmd/worker`** — job-driven ingestion: extract → chunk → embed → index; deletion cleanup
 - **`cmd/outbox-relay`** — transactional outbox publisher (optional until a broker is justified)
 
-One PostgreSQL (+ pgvector) for relational data, vectors, keyword search, and the job queue.
+One PostgreSQL (Cloud SQL + pgvector) for relational data, vectors, keyword search, and the job queue.
+Runs entirely on Google Cloud: development in Cloud Workstations, CI/CD in Cloud Build, runtime on
+Cloud Run, files in Cloud Storage, models on Vertex AI — nothing installed on the laptop.
 Tenant isolation defended in three layers: application authorization, row-level security,
 tenant-prefixed object storage. Guardrails fail closed; the model is not a security boundary.
 

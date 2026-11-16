@@ -44,7 +44,10 @@ Fail(ctx, jobID uuid.UUID, cause error) error // retry or dead per attempts
 **Claim:** `jobs` is under forced RLS and the claim must see every tenant's jobs, so it is the
 `claim_job(worker_id, lease)` system function (`migrations/0004_claim_job.sql`, full SQL in
 [system-design.md §4](../../docs/system-design.md#claiming-a-job)). `Claim` runs
-`SELECT * FROM claim_job($1, interval '60 seconds')`. The function, in one statement:
+`SELECT * FROM claim_job($1, interval '60 seconds')`. The same migration grants `app_system`
+`SELECT, UPDATE` on `jobs` and adds `CREATE POLICY system_access ON jobs TO app_system USING
+(true) WITH CHECK (true)` — no `BYPASSRLS` (unavailable on Cloud SQL). The function, in one
+statement:
 
 1. **Reaps** expired-lease jobs with `attempts >= max_attempts` → `dead` (JOB-REQ-011).
 2. **Claims** one job: `queued AND run_at <= now()` OR expired lease `AND attempts < max_attempts`,
@@ -75,11 +78,11 @@ document text or secrets — only ids (logging rule in `010`).
 
 ## 9. Testing strategy
 
-- Integration (Postgres testcontainer): concurrent-claim race with N workers (JOB-AC-003);
+- Integration (Postgres testcontainer, on the workstation and in Cloud Build): concurrent-claim race with N workers (JOB-AC-003);
   lease-expiry recovery with clock control (JOB-AC-004); backoff math (JOB-AC-005);
   dead-lettering (JOB-AC-006); idempotent enqueue (JOB-AC-007); heartbeat extension (JOB-AC-008);
   transactional enqueue commit/rollback (JOB-AC-001/002).
-- Failure & load: kill -9 worker mid-job → recovery; throughput benchmark (JOB-NFR-002);
+- Failure & load: kill -9 worker mid-job → recovery (test harness, plus one drill on the dev worker pool by stopping an instance); throughput benchmark (JOB-NFR-002);
   graceful shutdown test (JOB-AC-009).
 
 ## 10. Open questions

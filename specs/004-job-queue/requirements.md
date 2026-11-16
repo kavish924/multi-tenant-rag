@@ -55,5 +55,5 @@ crash recovery via lease expiry. No broker infrastructure required.
 
 ## Out of scope
 
-- Broker integration (Kafka/NATS) — handled by `006` outbox pattern when justified.
+- Broker integration (Pub/Sub) — handled by `006` outbox pattern when justified.
 - Priority queues, cron/scheduled jobs beyond `run_at` delay.

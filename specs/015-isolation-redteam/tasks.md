@@ -4,7 +4,7 @@
 
 - [ ] 1.1 Test-tenant provisioning + canary seeding into fixture corpora. (RT-REQ-002)
 - [ ] 1.2 Capture harness (all answers saved) + canary scanner. (RT-REQ-002, RT-AC-003)
-- [ ] 1.3 `redteam.yaml` config, localhost-target guard, budget meters. (design §7/§8)
+- [ ] 1.3 `redteam.yaml` config, target guard (localhost or allowlisted `-test` project only), budget meters. (design §7/§8)
 
 ## Group 2: Isolation suite (per-PR)
 

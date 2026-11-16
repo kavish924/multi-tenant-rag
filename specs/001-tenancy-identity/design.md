@@ -48,12 +48,18 @@ CREATE POLICY tenant_isolation ON documents
 A dedicated `app` DB role (no superuser, non-owner) is created in `0002_rls.sql`; the API and
 worker connect only as that role. RLS covers `memberships` too (it carries `tenant_id`).
 
-`migrations/0003_system_functions.sql` creates `app_system` (`NOLOGIN BYPASSRLS`) and the first
-system function (TEN-REQ-010/011); later specs add theirs (`claim_job` in `004`,
-`outbox_next`/`outbox_mark_published` in `006`, `sweep_candidates` in `013`):
+`migrations/0003_system_functions.sql` creates `app_system` (`NOLOGIN`, **no** `BYPASSRLS` —
+Cloud SQL has no superuser to grant it) and the first system function (TEN-REQ-010/011); later
+specs add theirs (`claim_job` in `004`, `outbox_next`/`outbox_mark_published` in `006`,
+`sweep_candidates` in `013`), each with a `system_access` policy on the tables it touches.
+Migrations run as `migrator` (table owner, member of `app_system` so it can assign function
+ownership); `app` is never a member of `app_system`:
 
 ```sql
-CREATE ROLE app_system NOLOGIN BYPASSRLS;
+CREATE ROLE app_system NOLOGIN;
+GRANT app_system TO migrator;
+GRANT SELECT ON memberships TO app_system;
+CREATE POLICY system_access ON memberships TO app_system USING (true);
 
 CREATE FUNCTION memberships_for_user(p_user uuid)
 RETURNS TABLE (tenant_id uuid, role text)
@@ -66,6 +72,10 @@ GRANT EXECUTE ON FUNCTION memberships_for_user(uuid) TO app;
 ```
 
 `app_system` gets only the table privileges its functions need (here: `SELECT` on `memberships`).
+
+**Cloud SQL role mapping** (`docs/gcp-environment.md §6`): `app` is a group role granted to the
+IAM database users of the `api`, `worker`, and `relay` service accounts; `migrator` is the IAM
+user of the migration job's service account. No database passwords exist.
 
 ## 5. API contract
 

@@ -3,7 +3,7 @@
 ## Group 1: Extract
 
 - [ ] 1.1 TXT extractor (charset-safe). (ING-REQ-001)
-- [ ] 1.2 PDF extractor + DOCX extractor in isolated subprocess runner with memory/CPU/wall/output limits. (ING-REQ-001/002, ING-AC-002)
+- [ ] 1.2 PDF extractor + DOCX extractor in isolated subprocess runner with Linux rlimits (memory/CPU/files) + wall-clock and output limits. (ING-REQ-001/002, ING-AC-002)
 - [ ] 1.3 Fixture corpus incl. hostile files (bomb, malformed PDF, huge docx). (ING-AC-007)
 
 ## Group 2: Chunk
@@ -13,7 +13,7 @@
 
 ## Group 3: Embed
 
-- [ ] 3.1 Batcher (configurable size/concurrency) over `EmbeddingProvider`. (ING-REQ-005)
+- [ ] 3.1 Batcher (configurable size/concurrency) over `EmbeddingProvider`; Vertex AI implementation (service-account auth) + deterministic fake for tests. (ING-REQ-005)
 - [ ] 3.2 Dimension validation per batch → typed failure. (ING-REQ-005, ING-AC-003)
 - [ ] 3.3 `embed_model` stamping + provider 429 bounded retry. (ING-REQ-006/007)
 
@@ -27,6 +27,6 @@
 ## Group 5: Tests and verification
 
 - [ ] 5.1 Idempotent rerun test: crash after embed → rerun → no duplicate rows (ING-AC-004).
-- [ ] 5.2 End-to-end fixture tests on Postgres+MinIO testcontainers. (ING-AC-001/006)
+- [ ] 5.2 End-to-end fixture tests on Postgres + `fake-gcs-server` testcontainers. (ING-AC-001/006)
 - [ ] 5.3 Load profile: 50 MB PDF p95; worker RSS cap. (ING-NFR-001/002)
 - [ ] 5.4 **Milestone 2 exit contribution:** kill worker mid-job → document state remains consistent.

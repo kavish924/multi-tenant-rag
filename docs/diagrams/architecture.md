@@ -4,7 +4,7 @@
 > All diagrams are [Mermaid](https://mermaid.js.org/) and render natively on GitHub.
 >
 > Companion docs: [System Architecture](../system-architecture.md) ·
-> [System Design](../system-design.md) · [Technology Stack](../tech-stack.md)
+> [System Design](../system-design.md) · [Technology Stack](../tech-stack.md) · [GCP Environment](../gcp-environment.md)
 
 ## Contents
 
@@ -13,7 +13,7 @@
 3. [Write path — asynchronous ingestion (sequence)](#3-write-path--asynchronous-ingestion-sequence)
 4. [Read path — ask with SSE streaming (sequence)](#4-read-path--ask-with-sse-streaming-sequence)
 5. [State machines — document status and job lifecycle](#5-state-machines--document-status-and-job-lifecycle)
-6. [Deployment view (Docker Compose)](#6-deployment-view-docker-compose)
+6. [Deployment view (Google Cloud)](#6-deployment-view-google-cloud)
 7. [Trust boundaries and guard layers](#7-trust-boundaries-and-guard-layers)
 
 ---
@@ -34,9 +34,9 @@ flowchart TB
     RAG["Multi-Tenant RAG Platform<br/>Go API · Go worker · outbox relay<br/>tenant-isolated ingestion and grounded answers"]
 
     subgraph external["External systems"]
-        EMB["Embedding provider<br/>hosted or local"]
-        LLM["LLM provider<br/>hosted or local"]
-        TEL["Telemetry backend<br/>Prometheus · Grafana · trace store"]
+        EMB["Embedding provider<br/>Vertex AI"]
+        LLM["LLM provider<br/>Vertex AI"]
+        TEL["Telemetry backend<br/>Cloud Trace · Managed Prometheus · Cloud Monitoring"]
     end
 
     MEMBER -->|"HTTPS upload · search · ask SSE"| RAG
@@ -65,8 +65,8 @@ flowchart LR
     end
 
     subgraph state["State"]
-        PG[("PostgreSQL + pgvector<br/>tenants · users · memberships<br/>documents · chunks<br/>jobs · outbox · usage_events")]
-        OBJ[("Object storage MinIO / S3<br/>tenant-prefixed keys")]
+        PG[("Cloud SQL PostgreSQL + pgvector<br/>tenants · users · memberships<br/>documents · chunks<br/>jobs · outbox · usage_events")]
+        OBJ[("Cloud Storage<br/>tenant-prefixed keys")]
     end
 
     subgraph providers["Model providers (behind interfaces)"]
@@ -76,8 +76,8 @@ flowchart LR
 
     subgraph telemetry["Telemetry"]
         OTC["OTel collector"]
-        PROM["Prometheus"]
-        GRAF["Grafana"]
+        PROM["Cloud Trace · Managed Prometheus"]
+        GRAF["Cloud Monitoring dashboards"]
     end
 
     C -->|"HTTPS upload · ask"| API
@@ -205,49 +205,52 @@ stateDiagram-v2
 
 ---
 
-## 6. Deployment view (Docker Compose)
+## 6. Deployment view (Google Cloud)
+
+One GCP project per environment (dev / test / prod). Details: [gcp-environment.md](../gcp-environment.md).
 
 ```mermaid
 flowchart TB
-    subgraph infra["docker-compose (dev) · containers (prod)"]
-        LB["Load balancer / reverse proxy"]
+    DEV["Cloud Workstations<br/>code · go test · testcontainers"] -->|git push| CB["Cloud Build<br/>test · build · migrate · deploy"]
+    CB --> AR["Artifact Registry<br/>images by digest"]
 
-        subgraph services["Stateless services — scale independently"]
-            API1["api #1"]
-            APIN["api #N — scale by request load"]
-            W1["worker #1 — bounded pool"]
-            WN["worker #N — scale by queue depth / age"]
-            RELAY["outbox-relay — single active instance"]
+    subgraph project["GCP project (per environment)"]
+        subgraph run["Cloud Run — stateless, scale independently"]
+            API["api service<br/>scale by request load · SSE"]
+            W["worker pool<br/>bounded pool · scale by queue depth / age"]
+            RELAY["outbox-relay<br/>single instance"]
+            MIG["migrate job"]
         end
 
-        PG[("PostgreSQL + pgvector<br/>single stateful core<br/>watch: queue depth · lock waits · ANN recall")]
-        MINIO[("MinIO dev · S3 prod")]
-        OTC["OTel collector"]
+        subgraph vpc["VPC — private access"]
+            PG[("Cloud SQL PostgreSQL + pgvector<br/>single stateful core<br/>watch: queue depth · lock waits · ANN recall")]
+        end
+
+        GCS[("Cloud Storage<br/>tenant-prefixed keys")]
+        VX["Vertex AI<br/>embeddings · generation"]
+        SM["Secret Manager"]
+        OBS["Cloud Trace · Managed Prometheus<br/>Cloud Monitoring · Cloud Logging"]
     end
 
-    PROM["Prometheus"] --> GRAF["Grafana dashboards"]
-
-    LB --> API1
-    LB --> APIN
-    API1 --> PG
-    APIN --> PG
-    API1 --> MINIO
-    W1 --> PG
-    WN --> PG
-    W1 --> MINIO
-    WN --> MINIO
+    AR --> run
+    API --> PG
+    W --> PG
     RELAY --> PG
-    API1 -.-> OTC
-    W1 -.-> OTC
-    WN -.-> OTC
-    OTC --> PROM
+    MIG --> PG
+    API --> GCS
+    W --> GCS
+    API --> VX
+    W --> VX
+    API --> SM
+    API -.->|OTel sidecar| OBS
+    W -.->|OTel sidecar| OBS
 ```
 
 Notes:
 
 - Workers shut down gracefully: in-flight jobs finish (`WaitGroup`); abandoned jobs are
   recovered via lease expiry — restarting a worker never corrupts document state.
-- A broker (Kafka / NATS) can later replace the in-Postgres queue via the transactional
+- A broker (Pub/Sub) can later replace the in-Postgres queue via the transactional
   outbox; consumers stay idempotent.
 
 ---

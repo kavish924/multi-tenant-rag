@@ -17,12 +17,15 @@ workload justifies it.
 | HTTP             | `net/http` with the standard mux, or `chi`   | Small surface, easy to test, plenty of middleware.               |
 | Database access  | `pgx` (optionally with `sqlc`)               | Native Postgres features: transactions, `set_config`, pgvector.  |
 | Migrations       | `goose` or `golang-migrate`                  | Versioned, reviewable schema changes.                            |
+| Database         | Cloud SQL for PostgreSQL                     | Managed Postgres; private IP; IAM database auth.                 |
 | Vectors          | PostgreSQL with `pgvector`                   | One datastore keeps tenancy, transactions, and deletion simple.  |
 | Keyword search   | Postgres `tsvector` + GIN index              | Covers exact terms, identifiers, and rare words embeddings miss. |
-| Files            | S3-compatible storage (MinIO locally)        | Same API in development and production.                          |
-| Jobs             | PostgreSQL-backed queue first                | Transactional enqueue, no extra infrastructure. Add Kafka, RabbitMQ, or NATS only when you can justify it. |
-| LLM & embeddings | Your own provider interfaces                 | Swap hosted and local models without touching retrieval.         |
-| Telemetry        | OpenTelemetry, Prometheus, Grafana           | Vendor-neutral traces and metrics.                               |
+| Files            | Cloud Storage (`cloud.google.com/go/storage`); `fake-gcs-server` in tests | Native client, V4 signed URLs, emulator for tests.  |
+| Jobs             | PostgreSQL-backed queue first                | Transactional enqueue, no extra infrastructure. Add Pub/Sub only when you can justify it. |
+| LLM & embeddings | Your own provider interfaces; Vertex AI implementations | Swap models without touching retrieval; service-account auth, no keys. |
+| Runtime          | Cloud Run (service for `api`, worker pools for `worker`/`outbox-relay`, job for migrations) | Containers without cluster ops. |
+| Telemetry        | OpenTelemetry → Cloud Trace, Managed Service for Prometheus, Cloud Monitoring | Vendor-neutral instrumentation, managed backends. |
+| Dev & CI         | Cloud Workstations, Cloud Build, Artifact Registry, Terraform | Nothing installed on the laptop ([gcp-environment.md](gcp-environment.md)). |
 
 ## Language and runtime
 
@@ -87,33 +90,38 @@ Design notes:
 - The job queue (`SELECT ... FOR UPDATE SKIP LOCKED`) with leases and retries.
 - The transactional outbox for event publishing.
 
-**Object storage (MinIO locally, S3 in production)** holds original uploaded files under
-tenant-prefixed keys: `tenants/{tenant_id}/documents/{document_id}`.
+**Cloud Storage** (one bucket per environment; `fake-gcs-server` in tests) holds original
+uploaded files under tenant-prefixed keys: `tenants/{tenant_id}/documents/{document_id}`.
+
+**Cloud SQL caveat:** there is no true superuser, so nothing may depend on `BYPASSRLS`. The
+cross-tenant system functions rely on policies scoped to the `app_system` role instead
+([system-design.md §1](system-design.md#cross-tenant-system-paths)).
 
 ## Observability stack
 
-- **OpenTelemetry** for traces and metrics (vendor neutral).
-- **Prometheus** for scraping and alerting rules.
-- **Grafana** for dashboards (latency histograms, queue depth/age, job failures, tokens and
-  estimated cost per tenant).
+- **OpenTelemetry** SDK in every binary (vendor neutral), exporting OTLP to a collector sidecar.
+- **Cloud Trace** for traces; **Managed Service for Prometheus** for metrics (PromQL works).
+- **Cloud Monitoring** dashboards and alert policies (latency histograms, queue depth/age, job
+  failures, tokens and estimated cost per tenant), defined in Terraform.
+- **Cloud Logging** for structured JSON logs correlated with traces.
 
 See [system-design.md — Observability](system-design.md#7-observability) for what to capture
 on each signal.
 
-## Local development
+## Development environment
 
-Docker Compose brings up the full environment:
+Nothing is installed on the laptop. Development happens in **Cloud Workstations**; tests run
+there and in **Cloud Build**. Full setup: [gcp-environment.md](gcp-environment.md).
 
-| Service         | Image / build            | Purpose                          |
-| --------------- | ------------------------ | -------------------------------- |
-| `api`           | built from `cmd/api`     | HTTP API + SSE                   |
-| `worker`        | built from `cmd/worker`  | Ingestion pipeline               |
-| `outbox-relay`  | built from `cmd/outbox-relay` | Publishes outbox rows (optional until a broker exists) |
-| `postgres`      | `pgvector/pgvector`      | Database with vector extension   |
-| `minio`         | `minio/minio`            | S3-compatible object storage     |
-| `otel-collector`| `otel/opentelemetry-collector` | Trace/metric collection    |
-| `prometheus`    | `prom/prometheus`        | Metrics scraping                 |
-| `grafana`       | `grafana/grafana`        | Dashboards                       |
+Inside the workstation, `deployments/compose.yaml` provides a disposable test stack:
+
+| Service          | Image                     | Stands in for          |
+| ---------------- | ------------------------- | ---------------------- |
+| `postgres`       | `pgvector/pgvector` (same major version as Cloud SQL) | Cloud SQL |
+| `gcs`            | `fsouza/fake-gcs-server`  | Cloud Storage          |
+| `otel-collector` | `otel/opentelemetry-collector` | Collector sidecar (console exporter) |
+
+The binaries themselves run with `go run` on the workstation, or deployed to the dev project.
 
 ## What we deliberately do NOT run early
 
@@ -128,6 +136,7 @@ Each of these can be introduced later without re-architecting, because the bound
 
 ## Related docs
 
+- [GCP Environment](gcp-environment.md) — workstations, CI/CD, Cloud Run, Cloud SQL roles, costs
 - [Architecture Diagrams](diagrams/architecture.md) — visual reference: context, containers, sequence paths, state machines, deployment, trust boundaries
 - [System Architecture](system-architecture.md) — binaries, paths, deployment view
 - [System Design](system-design.md) — data model, tenancy, pipeline, retrieval, guardrails

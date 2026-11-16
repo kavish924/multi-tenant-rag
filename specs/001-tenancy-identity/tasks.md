@@ -5,7 +5,8 @@
 - [ ] 1.1 `migrations/0001_init.sql` — tenants, users (with `password_hash`), memberships; role CHECK constraint. (TEN-REQ-001, TEN-REQ-004)
 - [ ] 1.2 `migrations/0002_rls.sql` — enable + FORCE RLS on tenant-owned tables; `tenant_isolation` policy; create dedicated `app` role; grant only needed privileges. (TEN-REQ-008)
 - [ ] 1.3 `internal/storage`: pgx pool wired to the `app` role; `WithTenant(ctx, tenantID, fn)` using `set_config('app.tenant_id', $1, true)` inside a transaction. (TEN-REQ-007)
-- [ ] 1.4 `migrations/0003_system_functions.sql` — `app_system` role (`NOLOGIN BYPASSRLS`), `memberships_for_user`, revoke from PUBLIC, grant EXECUTE to `app`. (TEN-REQ-010, TEN-REQ-011)
+- [ ] 1.4 `migrations/0003_system_functions.sql` — `app_system` role (`NOLOGIN`, no `BYPASSRLS`), `system_access` policy on `memberships` scoped `TO app_system`, `memberships_for_user`, revoke from PUBLIC, grant EXECUTE to `app`. (TEN-REQ-010, TEN-REQ-011)
+- [ ] 1.5 Cloud SQL role mapping in Terraform: `app` group role granted to the IAM DB users of `sa-api`/`sa-worker`/`sa-relay`; `migrator` for `sa-migrate`. (TEN-REQ-008, `docs/gcp-environment.md §6`)
 
 ## Group 2: Identity service
 
@@ -29,5 +30,5 @@
 - [ ] 5.1 Unit: JWT round-trip incl. expiry; password hash/verify; role comparisons.
 - [ ] 5.2 Integration: register/login/me; membership CRUD per role matrix.
 - [ ] 5.3 Security: query-without-WHERE under tenant context → restricted rows (TEN-AC-006); pool reuse isolation (TEN-AC-007); same-id cross-tenant fetch → only own data (TEN-AC-008).
-- [ ] 5.4 Security: `app` with no tenant context reads zero rows from every tenant-owned table; enumerate functions `app` can EXECUTE as `SECURITY DEFINER` and fail on any not in the TEN-REQ-010 list. (TEN-AC-009, TEN-AC-010)
+- [ ] 5.4 Security: `app` with no tenant context reads zero rows from every tenant-owned table; enumerate functions `app` can EXECUTE as `SECURITY DEFINER` and fail on any not in the TEN-REQ-010 list; fail if `app` is a member of `app_system` or any role has `BYPASSRLS`. (TEN-AC-009, TEN-AC-010)
 - [ ] 5.5 **Milestone 1 exit contribution:** tenant-scoped API tests pass (TEN-AC-001…010 green).

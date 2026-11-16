@@ -19,7 +19,8 @@ category, so the in-flight-job interaction is designed, not improvised.
 - `internal/ingestion/cleanup`: stage implementations for the `cleanup` job kind.
 - Sweeper: periodic job (`run_at` scheduled by relay-less cron loop in worker). It spans
   tenants, so it finds work via the `sweep_candidates(limit)` system function (`TEN-REQ-010`,
-  returns `(tenant_id, document_id)` only) and does each removal inside `WithTenant`.
+  returns `(tenant_id, document_id)` only; reads `documents` via a `system_access` policy scoped
+  `TO app_system`) and does each removal inside `WithTenant`.
 
 ## 4. Data model changes
 
@@ -56,7 +57,7 @@ non-zero ⇒ job fails and retries (it indicates a bug, so it also alerts).
 
 | Failure | Detection | Response |
 | ------- | --------- | -------- |
-| Object delete fails | S3 error | retry ladder (DEL-AC-004) |
+| Object delete fails | Cloud Storage error | retry ladder (DEL-AC-004) |
 | Chunks remain post-cleanup | invariant check | job fails → retry; alert after N attempts |
 | Purge partial failure | per-document error list | resume from failed set (idempotent) |
 

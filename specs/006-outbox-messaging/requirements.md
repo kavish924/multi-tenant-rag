@@ -26,7 +26,7 @@ a no-op/log publisher so the pattern is in place.
 - **OBX-REQ-001:** `Outbox.Emit(ctx, tx, topic, tenantID, payload)` writes an `outbox` row inside the caller's transaction.
 - **OBX-REQ-002:** Topics (initial): `document.created`, `document.indexed`, `document.failed`, `document.deleting`.
 - **OBX-REQ-003:** `cmd/outbox-relay` polls unpublished rows (`published_at IS NULL`) in `id` order, publishes via a `Publisher` interface, then marks `published_at` — one row at a time, at-least-once.
-- **OBX-REQ-004:** `Publisher` implementations: `LogPublisher` (default, no broker) and a placeholder NATS/Kafka impl when justified.
+- **OBX-REQ-004:** `Publisher` implementations: `LogPublisher` (default, no broker) and a Google Cloud Pub/Sub impl (ordering key = `tenant_id`) when justified.
 - **OBX-REQ-005:** Event payload carries: `event_id` (outbox row id), `topic`, `tenant_id`, `occurred_at`, and topic-specific ids (e.g. `document_id`) — never document text.
 - **OBX-REQ-006:** Consumers MUST be idempotent: dedupe on `event_id`/natural keys with unique constraints; spec `013` cleanup consumer demonstrates the pattern.
 - **OBX-REQ-007:** Relay crashes between publish and mark ⇒ redelivery on restart; consumers tolerate it.

@@ -14,7 +14,7 @@
 ## Group 3: Worker runtime
 
 - [ ] 3.1 Bounded-pool loop: semaphore reserved before claim; jittered poll. (JOB-REQ-009)
-- [ ] 3.2 Graceful shutdown on SIGTERM: stop claiming, `WaitGroup.Wait`. (JOB-REQ-009, JOB-AC-009)
+- [ ] 3.2 Graceful shutdown on SIGTERM (sent by Cloud Run on scale-in/redeploy): stop claiming, `WaitGroup.Wait` within the shutdown grace period. (JOB-REQ-009, JOB-AC-009)
 - [ ] 3.3 Heartbeat ticker inside `process`; abandon processing if worker no longer owns the job (lease takeover). (JOB-REQ-004)
 - [ ] 3.4 Tenant context: wrap stage execution in `WithTenant(job.TenantID)`. (JOB-REQ-010)
 

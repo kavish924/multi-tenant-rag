@@ -21,7 +21,10 @@ frameworks.
   `outbox` is under forced RLS and the relay serves every tenant, so it reads and acks only
   through two system functions (`TEN-REQ-010`): `outbox_next(limit)` (oldest unpublished rows)
   and `outbox_mark_published(id)` (guarded `UPDATE ... SET published_at = now() WHERE id = $1
-  AND published_at IS NULL RETURNING`).
+  AND published_at IS NULL RETURNING`). Both are owned by `app_system`, which reads `outbox`
+  via a `system_access` policy scoped `TO app_system` (no `BYPASSRLS`).
+- Publisher implementations: `LogPublisher` first; `PubSubPublisher` (Google Cloud Pub/Sub,
+  ordering key = `tenant_id` for per-tenant ordering, OBX-AC-005) when a broker is justified.
 
 ## 4. Data model changes
 

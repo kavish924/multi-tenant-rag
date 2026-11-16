@@ -11,7 +11,7 @@
 
 ## Group 3: Upload flow
 
-- [ ] 3.1 `ObjectStore.Put` call with tenant-prefixed key (interface from `003`; MinIO impl). (DOC-REQ-005)
+- [ ] 3.1 `ObjectStore.Put` call with tenant-prefixed key (interface from `003`; Cloud Storage impl). (DOC-REQ-005)
 - [ ] 3.2 Transactional create: document row (`uploaded`) + `queue.Enqueue("ingest", ...)` in one tx via `WithTenant`. (DOC-REQ-005, DOC-AC-005)
 - [ ] 3.3 Dedup handling: catch unique violation → fetch + return existing with `duplicate:true`, no second job. (DOC-REQ-004, DOC-AC-003, DOC-AC-004)
 - [ ] 3.4 Compensating action on failure: delete stored object (or tombstone row for later sweep). (DOC-REQ-006, DOC-AC-006)
@@ -25,7 +25,7 @@
 
 ## Group 5: Tests and verification
 
-- [ ] 5.1 Integration: full upload happy path on MinIO testcontainer; tx-failure rollback test.
+- [ ] 5.1 Integration: full upload happy path on Postgres + `fake-gcs-server` testcontainers; tx-failure rollback test.
 - [ ] 5.2 Security: cross-tenant GET/DELETE → 404 (DOC-AC-007); forged tenant scope (DOC-AC-009).
 - [ ] 5.3 Failure & load: concurrent duplicate uploads → exactly one doc + one job; 50 MB upload p95 timing check (DOC-NFR-002).
 - [ ] 5.4 **Milestone 1 exit contribution:** document CRUD + upload validation tests green.

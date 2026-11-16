@@ -36,7 +36,7 @@ created in a single transaction (queue mechanics in `004`).
 ### Non-functional
 
 - **DOC-NFR-001:** Uploads are streamed to object storage (bounded memory, no full-file buffering in RAM).
-- **DOC-NFR-002:** `POST /documents` responds after the transaction commits (not after processing): p95 < 1 s for a 50 MB file on local MinIO.
+- **DOC-NFR-002:** `POST /documents` responds after the transaction commits (not after processing): p95 < 1 s for a 50 MB file uploaded from the same region to the environment's Cloud Storage bucket.
 
 ## Acceptance criteria (EARS)
 

@@ -9,8 +9,8 @@
 ## Overview
 
 The goal: explain the latency and failure of any request from its telemetry alone. OpenTelemetry
-traces across API and worker (trace context travels through the job payload), Prometheus
-metrics, structured logs. Cardinality discipline: tenant ids are fine; document/user ids live
+traces across API and worker (trace context travels through the job payload), Prometheus-model
+metrics (Managed Service for Prometheus), structured logs (Cloud Logging). Cardinality discipline: tenant ids are fine; document/user ids live
 in traces and logs, never metric labels.
 
 ## User stories
@@ -24,7 +24,7 @@ in traces and logs, never metric labels.
 
 ### Functional
 
-- **OBS-REQ-001:** OTel tracing in `cmd/api` and `cmd/worker` (OTLP exporter → collector); W3C traceparent accepted on inbound requests.
+- **OBS-REQ-001:** OTel tracing in `cmd/api` and `cmd/worker` (OTLP exporter → collector sidecar → Cloud Trace / Managed Service for Prometheus); W3C traceparent accepted on inbound requests.
 - **OBS-REQ-002:** Query trace spans: `embed question`, `vector search`, `full-text search`, `fusion`, `rerank`, `llm first-token`, `llm total` — with tenant attribute.
 - **OBS-REQ-003:** Ingestion trace spans: `claim`, `extract`, `chunk`, `embed batch`, `index write`; child of the upload request's trace via trace context serialized into the job payload.
 - **OBS-REQ-004:** Metrics: `http_request_duration_seconds` (histogram, route label), `jobs_queue_depth`, `jobs_queue_age_seconds`, `jobs_attempts_total`/`jobs_failed_total` (kind), `provider_errors_total` (provider, kind), `tokens_total{tenant_id,kind,direction}`, `estimated_cost_usd_total{tenant_id}`.
@@ -35,7 +35,7 @@ in traces and logs, never metric labels.
 ### Non-functional
 
 - **OBS-NFR-001:** Telemetry adds < 5% overhead p95.
-- **OBS-NFR-002:** Dashboards exist for: ask latency (p50/p95/p99), queue depth/age, job failure rate, provider error rate, tokens & cost per tenant, parser failure reasons.
+- **OBS-NFR-002:** Cloud Monitoring dashboards (defined in Terraform) exist for: ask latency (p50/p95/p99), queue depth/age, job failure rate, provider error rate, tokens & cost per tenant, parser failure reasons.
 
 ## Acceptance criteria (EARS)
 
@@ -48,4 +48,4 @@ in traces and logs, never metric labels.
 
 ## Out of scope
 
-- Alert rules/on-call rotation (ops runbook, later); log aggregation backend choice (collector output is pluggable).
+- Alert rules/on-call rotation (ops runbook, later); backend is Google Cloud Observability; the collector output stays pluggable.

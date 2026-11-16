@@ -11,7 +11,7 @@ fail*; metrics answer *how is the system trending*; logs correlate the two.
 ## 2. Scope
 
 **In:** OTel wiring, span plan, metric definitions, structured logging stdlib wrapper, cardinality
-enforcement, compose services (collector, Prometheus, Grafana + dashboards).
+enforcement, OTel collector sidecar config, Cloud Monitoring dashboards (Terraform).
 **Out:** alerting rules; retention policy.
 
 ## 3. Components
@@ -20,8 +20,12 @@ enforcement, compose services (collector, Prometheus, Grafana + dashboards).
   `Logger(ctx)` (slog JSON with correlation fields), span helpers per stage.
 - Trace context in jobs: inject `traceparent` into job payload at `Enqueue`; worker extracts
   as parent (links if spans get too deep).
-- `deployments/`: otel-collector config (OTLP gRPC), prometheus scrape config, grafana
-  provisioning + `dashboards/rag.json`.
+- `deployments/`: otel-collector sidecar config (OTLP gRPC in; `googlecloud` exporter for
+  traces, `googlemanagedprometheus` exporter for metrics); Cloud Monitoring dashboard JSON under
+  `deployments/terraform/dashboards/`. On the workstation the compose collector uses a console
+  exporter.
+- Logs: slog JSON on stdout with `logging.googleapis.com/trace` and `spanId` fields so Cloud
+  Logging links each line to its trace.
 
 ## 4. Data model changes
 

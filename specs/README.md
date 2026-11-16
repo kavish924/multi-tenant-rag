@@ -51,7 +51,7 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | 2 — Async ingestion | Restarting a worker does not corrupt document state. |
 | 3 — RAG end to end | A test dataset demonstrates measurable retrieval and answer quality. |
 | 4 — Observable production | You can explain the latency and failure of a request using its telemetry. |
-| 5 — Release-quality capstone | Another developer can run the project using the documented setup. |
+| 5 — Release-quality capstone | Another developer can run the project using the documented setup — a Cloud Workstation plus the bootstrap sequence in `docs/gcp-environment.md §11`, with no local installs. |
 
 ## Requirement ID prefixes
 

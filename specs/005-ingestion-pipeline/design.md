@@ -26,15 +26,18 @@ internal/llm        # EmbeddingProvider interface (provider implementations)
 ```
 
 Parser isolation: `extract` spawns a helper subprocess per file (`go run`-built binary or
-exec of the same binary with `-mode=extract`), with `ulimit`-style limits via OS job objects/
-cgroups where available, plus hard wall-clock timeout and output cap. Worker survives any
+exec of the same binary with `-mode=extract`), with Linux resource limits on the child
+(`setrlimit`/`prlimit`: address space, CPU time, open files — the worker always runs in a Linux
+container on Cloud Run or the workstation), plus hard wall-clock timeout and output cap. Worker survives any
 parser death.
 
 ## 4. Data model changes
 
 `chunks` table (in `0001_init.sql`): per the shared schema — `UNIQUE (document_id, ordinal)`,
-`vector(1536)`, generated `tsv`, `embed_model`, HNSW + GIN + `(tenant_id, document_id)` indexes.
-Embedding dimension is config (`EMBEDDING_DIM`, default 1536) and must match migration.
+`vector(EMBEDDING_DIM)`, generated `tsv`, `embed_model`, HNSW + GIN + `(tenant_id, document_id)`
+indexes. `EMBEDDING_DIM` is set from the chosen **Vertex AI** embedding model's output size and
+must match the migration. pgvector HNSW supports `vector` up to 2,000 dims; above that use
+`halfvec` (≤ 4,000) or request reduced output dimensionality (`docs/gcp-environment.md §8`).
 
 ## 5. API contract (internal)
 
@@ -93,7 +96,7 @@ Chunks carry `tenant_id` from the document; all writes via `WithTenant` (RLS bac
 ## 9. Testing strategy
 
 - Unit: chunker boundaries/ordinals stability (ING-REQ-004); dimension validator; tokenizer counts.
-- Integration: PDF/DOCX/TXT fixtures end-to-end on testcontainers (ING-AC-001/006).
+- Integration: PDF/DOCX/TXT fixtures end-to-end on Postgres + `fake-gcs-server` testcontainers with a fake `EmbeddingProvider` (ING-AC-001/006); one smoke test against real Vertex AI in the dev project.
 - Failure: bomb/malformed fixtures (ING-AC-002/007); provider 429 simulation; wrong-dim mock (ING-AC-003);
   crash-between-stages rerun (ING-AC-004); delete-race (ING-AC-005).
 - Load: NFR-001/NFR-002 profile.
@@ -102,3 +105,4 @@ Chunks carry `tenant_id` from the document; all writes via `WithTenant` (RLS bac
 
 - Checkpointing stage outputs vs full rerun → **default:** full rerun (idempotent upserts; simpler).
 - Tokenizer: `tiktoken`-style BPE via Go lib → **default:** any consistent tokenizer; document choice in code.
+- Embedding model → **decide before migration 0001 lands**: pick the Vertex model, record its dimension in `EMBEDDING_DIM`, and choose `vector` vs `halfvec` accordingly.
