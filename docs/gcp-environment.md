@@ -1,14 +1,16 @@
 # GCP Environment
 
 > Multi-Tenant RAG Platform in Go — where development, testing, and runtime live. **Nothing is
-> installed on the developer's laptop**: code is written in Cloud Workstations, tests run there
-> and in Cloud Build, and every environment runs on Google Cloud.
+> installed on the developer's laptop**: code is written and tested in Cloud Shell, CI runs in
+> Cloud Build, and every environment runs on Google Cloud. Sized to start on the **$300 free-trial
+> credit** (§10).
 
 ## 1. Principles
 
-- **Browser-only laptop.** The laptop needs a browser (or VS Code with the Cloud Workstations
-  extension). Go, Docker, `gcloud`, Terraform, and `psql` live in the workstation image.
-- **One project per environment.** `<prefix>-dev`, `<prefix>-test`, `<prefix>-prod`. Projects are
+- **Browser-only laptop.** The laptop needs a browser. Go, Docker, `gcloud`, Terraform, and `psql`
+  come with Cloud Shell (§3).
+- **One project per environment.** `<prefix>-dev`, `<prefix>-test`, `<prefix>-prod` (on the free
+  trial, start with one project as dev; add test/prod when they are needed). Projects are
   the hard boundary for IAM, billing, quotas, and data — the same isolation-first instinct the
   platform applies to tenants.
 - **Everything as code.** Terraform in `deployments/terraform/` creates every resource below;
@@ -20,7 +22,7 @@
 
 | Concern | GCP service | Notes |
 | ------- | ----------- | ----- |
-| Development machine | **Cloud Workstations** | Custom image (§3); idle timeout; persistent home disk |
+| Development machine | **Cloud Shell** (fallback: small Compute Engine VM) | Free; Go, Docker, Terraform built in (§3) |
 | Source + CI/CD | GitHub + **Cloud Build** | Trigger on push / PR (§4) |
 | Container images | **Artifact Registry** | One Docker repository per project |
 | `cmd/api` | **Cloud Run service** | SSE streaming; request timeout raised for long answers |
@@ -36,31 +38,40 @@
 | Logs | **Cloud Logging** | Structured JSON on stdout |
 | Network | VPC with **Direct VPC egress** from Cloud Run | Private path to Cloud SQL |
 
-## 3. Development environment — Cloud Workstations
+## 3. Development environment — Cloud Shell
 
-**Workstation configuration** (Terraform, in the dev project):
+**Why not Cloud Workstations:** a workstation cluster bills a control-plane fee of about $0.20 per
+hour whether or not any workstation runs (~$144/month), plus $0.05 per vCPU-hour of management
+fee. That alone would consume half the free-trial credit in two months. Cloud Shell gives the
+same browser-only workflow at no cost.
 
-- Base image: Google's Code OSS (or IntelliJ) workstation image, extended by
-  `deployments/workstation/Dockerfile` with Go (pinned version), `golangci-lint`, `gcloud`,
-  Terraform, `psql`, and the migration CLI. Docker is available inside the workstation.
-- Machine: `e2-standard-4` to start (Go builds + a Postgres container fit comfortably).
-- **Idle timeout ~30 min** and a running-time cap, so a forgotten workstation stops billing.
-- Persistent home disk for the clone, Go module cache, and editor settings.
-- The workstation runs in the dev VPC, so it can reach the dev Cloud SQL private IP.
+**Cloud Shell** (console → `>_` icon, or full screen at `shell.cloud.google.com`):
 
-**Inner loop on the workstation:**
+- Free; Go, Docker, `gcloud`, Terraform, `psql`, and git are preinstalled. `go.mod` pins Go 1.25;
+  with the default `GOTOOLCHAIN=auto`, an older preinstalled Go downloads 1.25 automatically.
+- 5 GB persistent `$HOME` (repo clone and module cache); the VM itself is ephemeral, and there is
+  a weekly usage quota. Docker images and containers do not survive a session restart.
+- Built-in editor (Code OSS based) via **Open Editor**.
+- Eligibility: Google Workspace accounts in a new or trial organization can be refused ("not
+  eligible to use Cloud Shell") until the Workspace subscription has a processed payment. Fixes:
+  open the console with a personal Google account that has the **Owner** role on the project, or
+  use the fallback VM below.
+
+**Fallback: devbox VM.** Compute Engine `e2-standard-2`, Debian 12, 30 GB disk, opened with the
+console's **SSH** button and provisioned by [scripts/devbox-setup.sh](../scripts/devbox-setup.sh)
+(Docker, Go, golangci-lint, Terraform, `psql`). About $0.07 per running hour; stop it when idle.
+
+**Inner loop (Cloud Shell or devbox):**
 
 ```bash
-make up        # deployments/compose.yaml: postgres (pgvector image), fake-gcs-server, otel-collector
-make migrate   # applies migrations to the compose Postgres
-make test      # go test ./... && go test -race ./...
-make itest     # integration tests (testcontainers — fresh Postgres per package)
-make run-api   # API against the compose stack
+make up                        # deployments/compose.yaml: postgres (pgvector image)
+make test                      # go vet + go test -race ./...
+make itest                     # integration tests (testcontainers, fresh Postgres per package)
+make dev-login migrate run-api # API against the compose stack
 ```
 
-The compose stack exists **only inside the workstation**. It is the fast, disposable environment
-for tests and debugging; the deployed dev environment (Cloud Run + Cloud SQL) is the integration
-target.
+The compose stack is the fast, disposable environment for tests and debugging; the deployed dev
+environment (Cloud Run + Cloud SQL) is the integration target.
 
 **Emulators used in tests:**
 
@@ -80,7 +91,7 @@ target.
 2. `go test ./...` and `go test -race ./...`
 3. Integration tests against a Postgres container started on the `cloudbuild` network and reached
    by name through `TEST_DATABASE_URL` (testcontainers' port mapping is unreliable inside Cloud
-   Build steps; on the workstation the same tests use testcontainers)
+   Build steps; in Cloud Shell the same tests use testcontainers)
 4. Build images → Artifact Registry (tagged with the commit SHA)
 5. *(main branch only)* Run migrations as a Cloud Run job in **dev**
 6. *(main branch only)* Deploy `api`, `worker`, `outbox-relay` to **dev**
@@ -112,7 +123,8 @@ All run on Linux containers, so parser isolation (`005`) uses Linux resource lim
 
 ## 6. Cloud SQL and database roles
 
-- Private IP only, reached through Direct VPC egress (Cloud Run) or the dev VPC (workstation).
+- Private IP only, reached through Direct VPC egress (Cloud Run). People use Cloud SQL Studio
+  in the console; development tests never need the real instance.
 - Connect with the **Cloud SQL Go connector** using **IAM database authentication** — no
   database passwords.
 - Confirm the available `pgvector` version (`SELECT extversion FROM pg_extension WHERE extname =
@@ -135,8 +147,8 @@ Cloud SQL IAM users cannot create roles, so a one-time script run as the built-i
 grants both to `migrator` `WITH ADMIN OPTION`. The migrations then skip role creation, and the migrate
 job adds the IAM users listed in `APP_DB_LOGIN_ROLES` (api, worker, relay) to `app`.
 
-**Dev cost control:** the dev instance uses a small machine tier and can be stopped outside
-working hours (Terraform variable or a scheduled job).
+**Dev cost control:** the dev instance uses the shared-core `db-f1-micro` tier and is stopped
+outside working hours (§10).
 
 ## 7. Cloud Storage
 
@@ -166,39 +178,60 @@ working hours (Terraform variable or a scheduled job).
   lines to traces. The never-log-document-text rule (`010`) is unchanged.
 - Dashboards (latency, queue depth/age, job failures, tokens and cost per tenant) and alert
   policies live in Terraform as Cloud Monitoring resources.
-- On the workstation, the compose `otel-collector` exports to the console for debugging.
+- In Cloud Shell, the compose `otel-collector` exports to the console for debugging.
 
-## 10. Cost guardrails
+## 10. Cost guardrails — the $300 free-trial plan
 
-- **Billing budget + alerts** on every project from day one.
-- Workstation idle timeout; Cloud SQL dev instance stoppable; `api` min instances 0 in dev.
-- Vertex spend is bounded by the platform's own per-tenant quotas (`011`) and by project quotas.
+The free trial gives $300 of credit for 90 days. The dev environment is sized to use a fraction of
+it, leaving room for Vertex AI once retrieval and generation land (milestone 3).
+
+| Item | Choice | Approx. monthly cost |
+| ---- | ------ | -------------------- |
+| Development | Cloud Shell (devbox VM only as fallback) | $0 (devbox: ~$0.07/h running) |
+| Cloud SQL | `db-f1-micro`, 10 GB SSD, zonal, 3 backups; **stopped when not in use** | ~$9 if run 24/7, plus ~$2 disk |
+| Cloud Run `api` | min instances 0, max 2 | $0 (free tier) |
+| Cloud Build | default `e2-standard-2` machine | $0 (2,500 free build-minutes) |
+| Artifact Registry | keep 5 versions per image | ~$0 (0.5 GB free) |
+| Cloud Storage, Secret Manager, Logging | small volumes | ~$0 |
+| Vertex AI | pay per use (from milestone 3) | a few dollars in dev |
+| **Total** | | **~$10–15/month** before Vertex AI |
+
+Not used, because they bill while idle: Cloud Workstations (~$144/month cluster fee), regional
+(HA) Cloud SQL, Cloud NAT, min instances ≥ 1, GPUs, and a separate test project until needed.
+
+Habits:
+
+- **Budget alerts** at 50/90/100 % of a monthly budget (Billing → Budgets & alerts).
+- Stop Cloud SQL when done for the day and start it before working:
+  `gcloud sql instances patch dev-pg --activation-policy=NEVER` (or `ALWAYS`). A stopped instance
+  bills only its disk.
+- Check **Billing → Reports** weekly, grouped by service.
+- Vertex spend is bounded by the platform's per-tenant quotas (`011`) and by project quotas.
+- When the trial ends, resources stop unless the account is upgraded to a paid account; upgrade
+  before day 90 to keep the environment.
 
 ## 11. Bootstrap order (first time)
 
-Steps 1–4 run in **Cloud Shell** (browser; it already has `gcloud` and Terraform), so the laptop
-still needs nothing installed.
+Everything runs in **Cloud Shell** (or the devbox VM, §3); the laptop needs only a browser.
 
-1. Create the dev project, link billing, set a budget alert. Create the Terraform state bucket:
+1. Link billing (free-trial credit) and set a budget alert. In Cloud Shell, enable the base APIs
+   (`cloudresourcemanager`, `serviceusage`, `compute`, `cloudbuild`) and create the Terraform
+   state bucket:
    `gcloud storage buckets create gs://<project>-tfstate --location=<region> --uniform-bucket-level-access --public-access-prevention`.
-2. Connect the GitHub repository to Cloud Build once in the console (Cloud Build → Triggers →
-   Connect repository); the triggers in step 3 refer to it.
-3. Apply `deployments/terraform/bootstrap` (APIs, VPC + private services access, Artifact
-   Registry, `sa-build` + triggers, workstation cluster + config):
+2. Clone the repo, run `make tidy`, commit `go.sum`, and run `make up && make test && make itest`.
+3. Connect the GitHub repository to Cloud Build once in the console (Cloud Build → Triggers →
+   Connect repository); the triggers in step 4 refer to it.
+4. Apply `deployments/terraform/bootstrap` (APIs, VPC + private services access, Artifact
+   Registry, `sa-build` + triggers):
    `terraform init -backend-config=bucket=<project>-tfstate -backend-config=prefix=bootstrap`, then
-   `terraform apply` with a `terraform.tfvars` copied from the `.example` file. The VPC lives here,
-   not in `env/dev`, because the workstation and Cloud SQL must share it.
-4. Build the workstation image:
-   `gcloud builds submit --config deployments/workstation/cloudbuild.yaml --substitutions=_REGION=<region> deployments/workstation`.
-5. Start a workstation from the `go-dev` config, clone the repo, run `make tidy` and commit
-   `go.sum`, then `make up && make test && make itest`.
-6. Apply `deployments/terraform/env/dev` (Cloud SQL, bucket, runtime service accounts + IAM
+   `terraform apply` with a `terraform.tfvars` copied from the `.example` file.
+5. Apply `deployments/terraform/env/dev` (Cloud SQL, bucket, runtime service accounts + IAM
    database users, JWT secret, Cloud Run `api` service and `migrate` job), with
    `-backend-config=prefix=env/dev`.
-7. Run [scripts/cloudsql-bootstrap.sql](../scripts/cloudsql-bootstrap.sql) once in Cloud SQL Studio
+6. Run [scripts/cloudsql-bootstrap.sql](../scripts/cloudsql-bootstrap.sql) once in Cloud SQL Studio
    as `postgres` (roles for `migrator`, pgvector version check).
-8. Push to `main` → Cloud Build tests, pushes images, runs the migrate job, and deploys `api` to dev.
-9. Repeat 3, 6–8 for `test` and `prod` with their own projects and variables.
+7. Merge to `main`: Cloud Build tests, pushes images, runs the migrate job, and deploys `api` to dev.
+8. Later: repeat 4–7 for `test` and `prod` with their own projects and variables.
 
 This sequence is the documented setup referenced by the Milestone 5 exit criterion.
 

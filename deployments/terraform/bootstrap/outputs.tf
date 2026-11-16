@@ -13,7 +13,3 @@ output "artifact_registry" {
 output "build_service_account" {
   value = google_service_account.build.email
 }
-
-output "workstation_image" {
-  value = local.workstation_image
-}

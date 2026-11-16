@@ -33,7 +33,7 @@ citation_validity, refusal_accuracy}}`.
 
 ## 6. Key flows
 
-**Run:** compose-up profile `eval` on the workstation (or target the **test** project from Cloud Build; real Vertex AI either way for answer metrics) → migrations → ingest corpus (real pipeline) → for each case:
+**Run:** compose-up profile `eval` in Cloud Shell (or target the **test** project from Cloud Build; real Vertex AI either way for answer metrics) → migrations → ingest corpus (real pipeline) → for each case:
 search → answer (stream assembled) → deterministic metrics inline; judge calls batched at end →
 aggregate → compare thresholds → write report + summary.
 

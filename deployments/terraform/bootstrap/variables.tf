@@ -29,14 +29,3 @@ variable "github_repo" {
   type        = string
   description = "GitHub repository name"
 }
-
-variable "workstation_machine_type" {
-  type    = string
-  default = "e2-standard-4"
-}
-
-variable "developers" {
-  type        = list(string)
-  description = "IAM members allowed to create workstations, e.g. [\"user:you@example.com\"]"
-  default     = []
-}

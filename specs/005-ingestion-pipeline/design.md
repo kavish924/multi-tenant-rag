@@ -28,7 +28,7 @@ internal/llm        # EmbeddingProvider interface (provider implementations)
 Parser isolation: `extract` spawns a helper subprocess per file (`go run`-built binary or
 exec of the same binary with `-mode=extract`), with Linux resource limits on the child
 (`setrlimit`/`prlimit`: address space, CPU time, open files — the worker always runs in a Linux
-container on Cloud Run or the workstation), plus hard wall-clock timeout and output cap. Worker survives any
+container on Cloud Run or in Cloud Shell), plus hard wall-clock timeout and output cap. Worker survives any
 parser death.
 
 ## 4. Data model changes

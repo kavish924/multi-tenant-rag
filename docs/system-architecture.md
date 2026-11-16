@@ -174,8 +174,7 @@ contexthub/
 ├── api/
 │   └── openapi.yaml
 ├── deployments/
-│   ├── compose.yaml          # workstation-only test stack (postgres, fake-gcs-server, otel)
-│   ├── workstation/          # Cloud Workstations image (Dockerfile)
+│   ├── compose.yaml          # dev test stack in Cloud Shell (postgres, fake-gcs-server, otel)
 │   └── terraform/            # bootstrap + env/{dev,test,prod}
 ├── cloudbuild.yaml
 ├── tests/
@@ -210,7 +209,7 @@ bootstrap steps: [gcp-environment.md](gcp-environment.md).
 | Files           | Cloud Storage                | One bucket per environment; tenant-prefixed keys. |
 | Models          | Vertex AI                    | Embeddings + generation behind provider interfaces. |
 | Telemetry       | OTel collector sidecar → Cloud Trace, Managed Prometheus, Cloud Monitoring, Cloud Logging | Traces, metrics, dashboards, logs. |
-| Dev / CI        | Cloud Workstations, Cloud Build, Artifact Registry | No local installs; same image digest promoted dev → test → prod. |
+| Dev / CI        | Cloud Shell, Cloud Build, Artifact Registry | No local installs; same image digest promoted dev → test → prod. |
 
 Graceful shutdown: on Cloud Run's `SIGTERM`, workers stop claiming, finish in-flight jobs (`sync.WaitGroup`) and rely on lease expiry
 for anything abandoned, so restarting a worker never corrupts document state.
@@ -227,7 +226,7 @@ for anything abandoned, so restarting a worker never corrupts document state.
 
 ## Related docs
 
-- [GCP Environment](gcp-environment.md) — workstations, CI/CD, Cloud Run, Cloud SQL roles, costs
+- [GCP Environment](gcp-environment.md) — Cloud Shell, CI/CD, Cloud Run, Cloud SQL roles, free-trial costs
 - [Architecture Diagrams](diagrams/architecture.md) — visual reference: context, containers, sequence paths, state machines, deployment, trust boundaries
 - [Technology Stack](tech-stack.md) — tools, rationale, swap points
 - [System Design](system-design.md) — data model, tenancy, pipeline, retrieval, guardrails

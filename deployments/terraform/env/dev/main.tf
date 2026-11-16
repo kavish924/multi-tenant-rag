@@ -88,6 +88,8 @@ resource "google_sql_database_instance" "main" {
     edition           = "ENTERPRISE"
     tier              = var.db_tier
     availability_type = var.db_availability
+    disk_type         = "PD_SSD"
+    disk_size         = 10
     disk_autoresize   = true
 
     ip_configuration {
@@ -103,6 +105,9 @@ resource "google_sql_database_instance" "main" {
 
     backup_configuration {
       enabled                        = true
+      backup_retention_settings {
+        retained_backups = 3
+      }
       point_in_time_recovery_enabled = var.db_pitr
     }
 

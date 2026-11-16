@@ -12,7 +12,7 @@ retrieval quality, cost control, and being able to explain what the system did o
 | Doc | Contents |
 | --- | -------- |
 | [docs/tech-stack.md](docs/tech-stack.md) | Technology choices, rationale, swap points |
-| [docs/gcp-environment.md](docs/gcp-environment.md) | Google Cloud setup: Cloud Workstations, Cloud Build, Cloud Run, Cloud SQL roles, costs |
+| [docs/gcp-environment.md](docs/gcp-environment.md) | Google Cloud setup: Cloud Shell, Cloud Build, Cloud Run, Cloud SQL roles, $300 free-trial cost plan |
 | [docs/implementation-checklist.md](docs/implementation-checklist.md) | Ordered build checklist: decisions, GCP foundation, milestones 1–5 with exit gates, production readiness |
 | [docs/system-architecture.md](docs/system-architecture.md) | Binaries, write/read paths, deployment view |
 | [docs/system-design.md](docs/system-design.md) | Tenancy (RLS), data model, pipeline, retrieval, guardrails |
@@ -40,7 +40,7 @@ before its spec is approved.
 - **`cmd/outbox-relay`** — transactional outbox publisher (optional until a broker is justified)
 
 One PostgreSQL (Cloud SQL + pgvector) for relational data, vectors, keyword search, and the job queue.
-Runs entirely on Google Cloud: development in Cloud Workstations, CI/CD in Cloud Build, runtime on
+Runs entirely on Google Cloud: development in Cloud Shell, CI/CD in Cloud Build, runtime on
 Cloud Run, files in Cloud Storage, models on Vertex AI — nothing installed on the laptop.
 Tenant isolation defended in three layers: application authorization, row-level security,
 tenant-prefixed object storage. Guardrails fail closed; the model is not a security boundary.
@@ -51,5 +51,5 @@ Implementation has started with [spec 001 — Tenancy & Identity](specs/001-tena
 (in progress); the remaining specs are `Draft` and follow the
 [`specs/README.md`](specs/README.md) milestone order.
 
-On a Cloud Workstation: `make tidy` (writes `go.sum`), `make test`, `make itest` (Docker), or
+In Cloud Shell: `make tidy` (writes `go.sum`), `make test`, `make itest` (Docker), or
 `make up dev-login migrate run-api` for a local API against the compose database.

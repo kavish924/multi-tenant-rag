@@ -6,7 +6,7 @@
 
 ## Group 2: Implementations
 
-- [ ] 2.1 Cloud Storage implementation (put/get/delete/V4 signed URL via IAM `signBlob`) + compose `gcs` (`fake-gcs-server`) service on the workstation. (STO-REQ-003)
+- [ ] 2.1 Cloud Storage implementation (put/get/delete/V4 signed URL via IAM `signBlob`) + compose `gcs` (`fake-gcs-server`) service in Cloud Shell. (STO-REQ-003)
 - [ ] 2.1a Terraform: bucket per environment, uniform access, public access prevention, IAM for `sa-api`/`sa-worker` only. (STO-REQ-007, STO-AC-005)
 - [ ] 2.2 Idempotent delete (map `ErrObjectNotExist` → success). (STO-REQ-006, STO-AC-006)
 

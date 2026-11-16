@@ -28,14 +28,12 @@
 
 ## Phase 1 — GCP foundation
 
-Reference: [gcp-environment.md](gcp-environment.md) §2–§4 and §11.
+Reference: [gcp-environment.md](gcp-environment.md) §2–§4, §10 (free-trial cost plan) and §11.
 
 - [ ] Dev project created, billing linked, **budget + alerts** set
 - [ ] Terraform state bucket; `deployments/terraform/bootstrap` applied
 - [ ] Artifact Registry repository *(Terraform written: `bootstrap`)*
-- [ ] Cloud Workstations cluster + config (custom image from `deployments/workstation/Dockerfile`:
-      Go, Docker, `gcloud`, Terraform, `psql`, migration CLI, linter); **idle timeout set**
-- [ ] Workstation started; repo cloned; GitHub connected
+- [ ] Cloud Shell opens (or devbox VM via `scripts/devbox-setup.sh`); repo cloned; `make tidy` → `go.sum` committed
 - [ ] Cloud Build trigger on push / pull request *(Terraform written: `bootstrap`)*
 - [ ] **Spike:** one testcontainers Postgres test passes in Cloud Build (pin the networking
       setup that works) *(replaced: Cloud Build runs a named Postgres container + `TEST_DATABASE_URL`)*
@@ -48,7 +46,7 @@ Reference: [gcp-environment.md](gcp-environment.md) §2–§4 and §11.
 - [ ] `internal/` package layout per [system-architecture.md](system-architecture.md#internal-package-layout)
 - [x] Config loading from env; health endpoint on `api`
 - [x] `Makefile`: `up`, `down`, `migrate`, `test`, `itest`, `lint`, `run-api`, `run-worker`
-- [x] `deployments/compose.yaml` (workstation only; postgres now, fake-gcs and otel with 003/010): `pgvector/pgvector`, `fake-gcs-server`,
+- [x] `deployments/compose.yaml` (Cloud Shell dev stack; postgres now, fake-gcs and otel with 003/010): `pgvector/pgvector`, `fake-gcs-server`,
       `otel-collector`
 - [x] Dockerfiles (minimal base image) for each binary
 - [x] `cloudbuild.yaml`: vet → lint → `go test` → `go test -race` → integration → build → push

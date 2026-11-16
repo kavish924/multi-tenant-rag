@@ -1,4 +1,4 @@
-# Run inside a Cloud Workstation (Go + Docker available); nothing runs on the laptop.
+# Run in Cloud Shell or the devbox VM (Go + Docker available); nothing runs on the laptop.
 
 COMPOSE := docker compose -f deployments/compose.yaml
 DEV_DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/app?sslmode=disable
@@ -9,7 +9,7 @@ APP_DATABASE_URL ?= postgres://app_dev:app_dev@localhost:5432/app?sslmode=disabl
 tidy:            ## resolve modules and write go.sum
 	go mod tidy
 
-up:              ## start the workstation test stack
+up:              ## start the dev test stack
 	$(COMPOSE) up -d --wait
 
 down:

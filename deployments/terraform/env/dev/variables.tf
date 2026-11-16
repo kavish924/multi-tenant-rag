@@ -14,8 +14,8 @@ variable "region" {
 
 variable "db_tier" {
   type        = string
-  description = "Cloud SQL machine tier; small in dev"
-  default     = "db-custom-1-3840"
+  description = "Cloud SQL tier. Shared-core db-f1-micro (~$9/month) fits the free-trial budget; use db-custom-* for test/prod"
+  default     = "db-f1-micro"
 }
 
 variable "db_availability" {
@@ -47,7 +47,7 @@ variable "api_min_instances" {
 
 variable "api_max_instances" {
   type    = number
-  default = 3
+  default = 2
 }
 
 variable "api_public" {

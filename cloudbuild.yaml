@@ -15,7 +15,8 @@ substitutions:
 
 options:
   logging: CLOUD_LOGGING_ONLY
-  machineType: E2_HIGHCPU_8
+  # Default machine (e2-standard-2): the 2,500 free build-minutes per month
+  # apply only to it, so no machineType override.
   env:
     - GOMODCACHE=/workspace/.gomodcache
     - GOCACHE=/workspace/.gocache
@@ -29,7 +30,7 @@ steps:
       - -c
       - |
         set -euo pipefail
-        test -f go.sum || { echo "go.sum missing: run 'make tidy' on a workstation and commit go.sum"; exit 1; }
+        test -f go.sum || { echo "go.sum missing: run 'make tidy' in Cloud Shell and commit go.sum"; exit 1; }
         go mod download
         go mod tidy -diff
 

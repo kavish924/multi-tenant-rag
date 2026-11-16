@@ -1,4 +1,4 @@
-# Workstation-only test stack (docs/tech-stack.md). Not used in Cloud Run.
+# Dev test stack for Cloud Shell or the devbox VM (docs/tech-stack.md). Not used in Cloud Run.
 # fake-gcs-server and the OTel collector join when specs 003 and 010 land.
 services:
   postgres:

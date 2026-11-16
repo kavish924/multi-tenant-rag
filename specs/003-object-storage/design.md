@@ -33,7 +33,7 @@ func DocumentKey(tenantID, documentID uuid.UUID) string {
 - Cloud Storage impl via `cloud.google.com/go/storage` (service-account auth; `Presign` →
   `SignedURL` with `SigningSchemeV4`, signed through IAM `signBlob` so no key file exists).
   Tests run it against `fake-gcs-server` via `STORAGE_EMULATOR_HOST` (compose service `gcs` on
-  the workstation; testcontainers in CI). Bucket created by Terraform, not by the app.
+  Cloud Shell; testcontainers in CI). Bucket created by Terraform, not by the app.
 
 ## 4. Data model changes
 

@@ -47,7 +47,7 @@ every captured answer → category report → CI gate on any failed category.
 
 ## 8. Security and multi-tenancy
 
-The suite itself is dangerous by design: runs only against the workstation's compose stack or
+The suite itself is dangerous by design: runs only against the Cloud Shell compose stack or
 the dedicated **test** GCP project (guard: `REDTEAM_TARGET` must be `localhost` or a URL on the
 allowlist in `redteam.yaml`, and the resolved GCP project id must end in `-test`; hard refuse
 otherwise — never dev with real users, never prod).

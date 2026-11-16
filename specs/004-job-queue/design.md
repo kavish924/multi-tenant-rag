@@ -78,7 +78,7 @@ document text or secrets — only ids (logging rule in `010`).
 
 ## 9. Testing strategy
 
-- Integration (Postgres testcontainer, on the workstation and in Cloud Build): concurrent-claim race with N workers (JOB-AC-003);
+- Integration (Postgres testcontainer, in Cloud Shell and in Cloud Build): concurrent-claim race with N workers (JOB-AC-003);
   lease-expiry recovery with clock control (JOB-AC-004); backoff math (JOB-AC-005);
   dead-lettering (JOB-AC-006); idempotent enqueue (JOB-AC-007); heartbeat extension (JOB-AC-008);
   transactional enqueue commit/rollback (JOB-AC-001/002).

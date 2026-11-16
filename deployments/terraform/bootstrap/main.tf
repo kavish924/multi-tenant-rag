@@ -1,5 +1,6 @@
 # Foundation for one project: APIs, network, Artifact Registry, Cloud Build
-# service account + triggers, and the Cloud Workstations cluster/config.
+# service account + triggers. No Cloud Workstations: a cluster bills ~$0.20/h
+# even when idle; development uses Cloud Shell (docs/gcp-environment.md §3).
 # Applied once from Cloud Shell (docs/gcp-environment.md §11).
 
 terraform {
@@ -37,9 +38,7 @@ locals {
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
     "storage.googleapis.com",
-    "workstations.googleapis.com",
   ]
-  workstation_image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.app.repository_id}/workstation:latest"
 }
 
 resource "google_project_service" "apis" {
@@ -91,7 +90,7 @@ resource "google_artifact_registry_repository" "app" {
     id     = "keep-recent"
     action = "KEEP"
     most_recent_versions {
-      keep_count = 20
+      keep_count = 5 # stay inside the Artifact Registry free storage
     }
   }
 }
@@ -147,70 +146,4 @@ resource "google_cloudbuild_trigger" "main" {
       branch = "^main$"
     }
   }
-}
-
-# -------------------------------------------------------- cloud workstations
-
-resource "google_service_account" "workstation" {
-  account_id   = "sa-workstation"
-  display_name = "Cloud Workstations VM"
-}
-
-resource "google_artifact_registry_repository_iam_member" "workstation_pull" {
-  location   = google_artifact_registry_repository.app.location
-  repository = google_artifact_registry_repository.app.name
-  role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:${google_service_account.workstation.email}"
-}
-
-resource "google_workstations_workstation_cluster" "dev" {
-  provider               = google-beta
-  workstation_cluster_id = "${var.env}-cluster"
-  location               = var.region
-  network                = google_compute_network.vpc.id
-  subnetwork             = google_compute_subnetwork.main.id
-  depends_on             = [google_project_service.apis]
-}
-
-resource "google_workstations_workstation_config" "go" {
-  provider               = google-beta
-  workstation_config_id  = "go-dev"
-  workstation_cluster_id = google_workstations_workstation_cluster.dev.workstation_cluster_id
-  location               = var.region
-
-  idle_timeout    = "1800s"  # stop billing ~30 min after the last activity
-  running_timeout = "43200s" # hard cap: 12 h per session
-
-  host {
-    gce_instance {
-      machine_type                = var.workstation_machine_type
-      boot_disk_size_gb           = 50
-      service_account             = google_service_account.workstation.email
-      disable_public_ip_addresses = false # needs internet for go modules / images
-    }
-  }
-
-  persistent_directories {
-    mount_path = "/home"
-    gce_pd {
-      size_gb        = 200
-      fs_type        = "ext4"
-      reclaim_policy = "RETAIN"
-    }
-  }
-
-  container {
-    image = local.workstation_image
-  }
-}
-
-# Lets the developer create and use their own workstation from the config.
-resource "google_workstations_workstation_config_iam_member" "developer" {
-  provider               = google-beta
-  for_each               = toset(var.developers)
-  location               = var.region
-  workstation_cluster_id = google_workstations_workstation_cluster.dev.workstation_cluster_id
-  workstation_config_id  = google_workstations_workstation_config.go.workstation_config_id
-  role                   = "roles/workstations.workstationCreator"
-  member                 = each.value
 }
