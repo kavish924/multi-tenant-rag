@@ -13,6 +13,7 @@ retrieval quality, cost control, and being able to explain what the system did o
 | --- | -------- |
 | [docs/tech-stack.md](docs/tech-stack.md) | Technology choices, rationale, swap points |
 | [docs/gcp-environment.md](docs/gcp-environment.md) | Google Cloud setup: Cloud Workstations, Cloud Build, Cloud Run, Cloud SQL roles, costs |
+| [docs/implementation-checklist.md](docs/implementation-checklist.md) | Ordered build checklist: decisions, GCP foundation, milestones 1–5 with exit gates, production readiness |
 | [docs/system-architecture.md](docs/system-architecture.md) | Binaries, write/read paths, deployment view |
 | [docs/system-design.md](docs/system-design.md) | Tenancy (RLS), data model, pipeline, retrieval, guardrails |
 | [docs/diagrams/architecture.md](docs/diagrams/architecture.md) | Mermaid diagrams: context, containers, sequences, states, trust boundaries |
