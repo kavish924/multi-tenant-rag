@@ -31,8 +31,9 @@ recorded reason.
 - **ING-REQ-005 (Embed):** chunks are embedded in batches; every returned vector's dimension is validated against the configured model dimension before writing.
 - **ING-REQ-006:** The embedding model name is recorded per chunk (`embed_model`) so re-embedding under a model change is possible.
 - **ING-REQ-007:** Rate limits from the embedding provider are respected with bounded retries (queue-level backoff applies above this).
-- **ING-REQ-008 (Index):** chunks + vectors are written in **one transaction** that re-checks the document was not deleted meanwhile; on success document status → `indexed`.
+- **ING-REQ-008 (Index):** chunks + vectors are written in **one transaction** that first locks the document row (`SELECT ... FOR UPDATE`) and cancels if `deleted_at IS NOT NULL`; on success document status → `indexed`. An unlocked `NOT EXISTS` check is not sufficient (`docs/system-design.md §3`).
 - **ING-REQ-009:** Any stage failure sets document `failed` with `error` reason; the job fails per queue retry semantics; document may re-enter `processing` on retry.
+- **ING-REQ-010:** Every document status write by the pipeline (`processing`, `failed`, `indexed`) is guarded by `AND deleted_at IS NULL`, so it can never overwrite `deleting`/`deleted`. A job that starts on an already-deleted document completes as cancelled without extracting.
 - **ING-REQ-010:** Stages are idempotent: rerunning the job from any point produces the same final rows (upsert semantics everywhere).
 
 ### Non-functional
@@ -47,6 +48,7 @@ recorded reason.
 - **ING-AC-003:** WHEN an embedding response has a wrong-dimension vector, THE SYSTEM SHALL fail with reason `embedding_dimension_mismatch` before any DB write.
 - **ING-AC-004:** WHEN the job is retried after a crash between Embed and Index, THE SYSTEM SHALL upsert the same `(document_id, ordinal)` rows without duplicates.
 - **ING-AC-005:** WHEN the document is soft-deleted before the Index transaction, THE SYSTEM SHALL write no chunks and mark the job succeeded-as-cancelled (document stays `deleting`).
+- **ING-AC-009:** WHEN a delete commits while the Index transaction is waiting on the document row lock, THE SYSTEM SHALL write no chunks and SHALL NOT change the status from `deleting` (scheduled-interleaving test with two connections).
 - **ING-AC-006:** WHEN the pipeline completes, THE SYSTEM SHALL set status `indexed`; on terminal failure, `failed` + human-readable `error`.
 - **ING-AC-007:** WHEN a malicious file (e.g. decompression bomb, malformed PDF) is processed, THE SYSTEM SHALL fail safely with a reason and no worker crash.
 - **ING-AC-008:** WHEN processing finishes (either way), THE SYSTEM SHALL emit the corresponding event via the outbox (`006`): `document.indexed` or `document.failed`.

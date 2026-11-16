@@ -17,8 +17,11 @@ frameworks.
 ## 3. Components
 
 - `internal/messaging`: `Outbox.Emit`, `Publisher` interface, `LogPublisher`.
-- `cmd/outbox-relay`: poll loop (batch, ordered by id), publish, mark; single active instance
-  (row-level claim via `UPDATE ... SET published_at = now() WHERE id = $1 AND published_at IS NULL RETURNING`).
+- `cmd/outbox-relay`: poll loop (batch, ordered by id), publish, mark; single active instance.
+  `outbox` is under forced RLS and the relay serves every tenant, so it reads and acks only
+  through two system functions (`TEN-REQ-010`): `outbox_next(limit)` (oldest unpublished rows)
+  and `outbox_mark_published(id)` (guarded `UPDATE ... SET published_at = now() WHERE id = $1
+  AND published_at IS NULL RETURNING`).
 
 ## 4. Data model changes
 
@@ -38,8 +41,7 @@ type Event struct {
 ## 6. Key flows
 
 **Emit:** inside the same `WithTenant` tx as the state change, insert outbox row → commit.
-**Relay:** select oldest unpublished batch (e.g. 100) → for each: publish → mark (guarded
-update). Crash before mark ⇒ row stays unpublished ⇒ redelivery (OBX-AC-002).
+**Relay:** `outbox_next(100)` → for each: publish → `outbox_mark_published(id)`. Crash before mark ⇒ row stays unpublished ⇒ redelivery (OBX-AC-002).
 
 ## 7. Error handling and failure modes
 

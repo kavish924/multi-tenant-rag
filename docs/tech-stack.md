@@ -29,7 +29,8 @@ workload justifies it.
 - **Go** — three binaries (`cmd/api`, `cmd/worker`, `cmd/outbox-relay`) built from one module,
   sharing `internal/` packages. Binaries scale and fail independently.
 - **SQL** lives in versioned migration files (`migrations/*.sql`) and a few `.sql` files
-  embedded in Go code (e.g. `internal/jobs/claim.sql`, `internal/retrieval/hybrid.sql`) so the
+  embedded in Go code (e.g. `internal/retrieval/hybrid.sql`; cross-tenant queries such as the job
+  claim live in migrations as reviewed `SECURITY DEFINER` functions) so the
   hot queries are reviewable as SQL, not hidden behind an ORM.
 
 ## Provider abstractions (the swap points)

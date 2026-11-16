@@ -44,10 +44,23 @@ type Pipeline struct{ Extract, Chunk, Embed, Index Stage }
 Process(ctx, doc) // runs stages in order; job heartbeat between stages
 ```
 
-Chunk record: `{ordinal, content, tokenCount, page, heading}`. Index write: `INSERT ... ON
-CONFLICT (document_id, ordinal) DO UPDATE` inside `WithTenant`, with
-`WHERE NOT EXISTS (SELECT 1 FROM documents WHERE id=$doc AND deleted_at IS NOT NULL)` guard —
-or pre-check `deleted_at IS NULL` + row lock.
+Chunk record: `{ordinal, content, tokenCount, page, heading}`. Index transaction (inside
+`WithTenant`), in this order:
+
+```sql
+SELECT deleted_at FROM documents WHERE id = $doc FOR UPDATE;   -- 1. lock; cancel if NOT NULL
+INSERT INTO chunks (...) VALUES (...)                           -- 2. upsert (batched)
+  ON CONFLICT (document_id, ordinal) DO UPDATE SET ...;
+DELETE FROM chunks WHERE document_id = $doc AND ordinal >= $n;  -- 3. drop stale tail on re-run
+UPDATE documents SET status = 'indexed', error = NULL           -- 4. guarded status write
+  WHERE id = $doc AND deleted_at IS NULL;
+```
+
+The row lock is what makes deletion race-free: Delete (`002`) updates the same row, so the two
+transactions serialize (reasoning in [system-design.md §3](../../docs/system-design.md#3-ingestion-pipeline)).
+An unlocked `WHERE NOT EXISTS (... deleted_at IS NOT NULL)` guard was rejected: it reads a
+snapshot and misses a Delete that commits mid-transaction. All other status writes
+(`processing`, `failed`) also carry `AND deleted_at IS NULL` (ING-REQ-010).
 
 ## 6. Key flows
 
@@ -58,8 +71,9 @@ Chunk → Embed batches → Index tx → status `indexed` → outbox `document.i
 checkpoint (stage outputs are deterministic; default: full rerun — simplicity over micro-optimization);
 upserts make it converge (ING-AC-004).
 
-**Deleted mid-flight:** Index pre-check sees `deleted_at` → cancel (ING-AC-005); `013` cleanup
-removes any partial rows.
+**Deleted mid-flight:** Index's locked read sees `deleted_at` → write nothing, job completes as
+cancelled (ING-AC-005/009). If Index committed first, its chunks exist before Delete commits, and
+the `013` cleanup job (enqueued by Delete) removes them.
 
 ## 7. Error handling and failure modes
 
@@ -68,7 +82,7 @@ removes any partial rows.
 | Parser limit exceeded | subprocess exit/timeout/oversize | fail job `parser_limit_exceeded` (ING-AC-002/007) |
 | Wrong embedding dim | per-batch validation | fail `embedding_dimension_mismatch` (ING-AC-003) |
 | Provider 429 | status code | in-stage bounded retry (ING-REQ-007) → else job retry ladder |
-| Deleted during processing | Index pre-check | cancel (ING-AC-005) |
+| Deleted during processing | locked read in Index tx | cancel (ING-AC-005/009) |
 | Extract output empty | zero chunks | fail `no_text_extracted` |
 
 ## 8. Security and multi-tenancy

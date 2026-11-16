@@ -46,7 +46,26 @@ CREATE POLICY tenant_isolation ON documents
 ```
 
 A dedicated `app` DB role (no superuser, non-owner) is created in `0002_rls.sql`; the API and
-worker connect only as that role.
+worker connect only as that role. RLS covers `memberships` too (it carries `tenant_id`).
+
+`migrations/0003_system_functions.sql` creates `app_system` (`NOLOGIN BYPASSRLS`) and the first
+system function (TEN-REQ-010/011); later specs add theirs (`claim_job` in `004`,
+`outbox_next`/`outbox_mark_published` in `006`, `sweep_candidates` in `013`):
+
+```sql
+CREATE ROLE app_system NOLOGIN BYPASSRLS;
+
+CREATE FUNCTION memberships_for_user(p_user uuid)
+RETURNS TABLE (tenant_id uuid, role text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+  SELECT m.tenant_id, m.role FROM memberships m WHERE m.user_id = p_user;
+$$;
+ALTER FUNCTION memberships_for_user(uuid) OWNER TO app_system;
+REVOKE ALL ON FUNCTION memberships_for_user(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION memberships_for_user(uuid) TO app;
+```
+
+`app_system` gets only the table privileges its functions need (here: `SELECT` on `memberships`).
 
 ## 5. API contract
 
@@ -66,9 +85,13 @@ Errors: `401` unauthenticated/expired, `403` insufficient role, `404` non-member
 
 ## 6. Key flows
 
-**Request authorization (happy):** token verified → user id from `sub` → tenant id from
-`X-Tenant-ID` (default: sole membership) → membership lookup (user, tenant) → role ≥ required →
-handler proceeds; all DB work via `WithTenant`.
+**Request authorization (happy):** token verified → user id from `sub` →
+`memberships_for_user(sub)` (no tenant context needed) → tenant id from `X-Tenant-ID` (default:
+sole membership) must be in that list → role ≥ required → handler proceeds; all DB work via
+`WithTenant`.
+
+**Create tenant:** `id := uuid.New()` → `WithTenant(id, ...)`: insert `tenants` row + owner
+`memberships` row (passes RLS `WITH CHECK` because `app.tenant_id = id`).
 
 **Failure:** expired token → 401 before any lookup; no membership → 404; insufficient role → 403.
 
@@ -92,7 +115,8 @@ This spec **is** layer 1 (application authorization) and sets up layer 2 (RLS). 
 - Unit: JWT round-trip, password hash/verify, role checks, middleware ordering.
 - Integration: register/login/me; membership CRUD; role matrix.
 - Security (feeds `015`): cross-tenant access (TEN-AC-003/008), forged tenant id (AC-005),
-  RLS without WHERE (AC-006), pool isolation (AC-007).
+  RLS without WHERE (AC-006), pool isolation (AC-007), no-context reads return nothing and the
+  system-function allowlist is closed (AC-009/010).
 
 ## 10. Open questions
 

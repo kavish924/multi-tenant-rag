@@ -16,7 +16,7 @@ worker loop. **Out:** pipeline stages (`005`), broker relay (`006`), queue metri
 ## 3. Components
 
 - `internal/jobs`: `Queue` interface (`Enqueue`, `Claim`, `Heartbeat`, `Complete`, `Fail`),
-  claim SQL embedded as `claim.sql`, `Backoff(attempts)` helper.
+  `Claim` calling the `claim_job` system function (`migrations/0004_claim_job.sql`), `Backoff(attempts)` helper.
 - `cmd/worker`: loop with `sem` semaphore + `WaitGroup` (per JOB-REQ-009/AC-009).
 
 ## 4. Data model changes
@@ -41,19 +41,18 @@ Fail(ctx, jobID uuid.UUID, cause error) error // retry or dead per attempts
 
 ## 6. Key flows
 
-**Claim (core SQL):**
+**Claim:** `jobs` is under forced RLS and the claim must see every tenant's jobs, so it is the
+`claim_job(worker_id, lease)` system function (`migrations/0004_claim_job.sql`, full SQL in
+[system-design.md §4](../../docs/system-design.md#claiming-a-job)). `Claim` runs
+`SELECT * FROM claim_job($1, interval '60 seconds')`. The function, in one statement:
 
-```sql
-UPDATE jobs SET status='running', locked_by=$1,
-       lease_expires_at = now() + interval '60 seconds', attempts = attempts + 1
-WHERE id = (
-  SELECT id FROM jobs
-  WHERE (status='queued' AND run_at <= now())
-     OR (status='running' AND lease_expires_at < now())
-  ORDER BY run_at
-  FOR UPDATE SKIP LOCKED LIMIT 1)
-RETURNING id, tenant_id, kind, payload, attempts, max_attempts;
-```
+1. **Reaps** expired-lease jobs with `attempts >= max_attempts` → `dead` (JOB-REQ-011).
+2. **Claims** one job: `queued AND run_at <= now()` OR expired lease `AND attempts < max_attempts`,
+   `ORDER BY run_at FOR UPDATE SKIP LOCKED LIMIT 1` → `running`, lease, `attempts + 1`.
+
+`Heartbeat`/`Complete`/`Fail` run as plain statements inside `WithTenant(job.TenantID)`, each
+guarded by `WHERE id = $1 AND locked_by = $worker` so a worker whose lease was taken over cannot
+write.
 
 **Worker loop:** `sem <- struct{}{}` → `Claim` → empty ⇒ release + jittered sleep → else
 `go process` (heartbeat ticker + stage runner) → on success `Complete`, on error `Fail`.
@@ -63,13 +62,15 @@ RETURNING id, tenant_id, kind, payload, attempts, max_attempts;
 | Failure | Detection | Response |
 | ------- | --------- | -------- |
 | Worker crash | lease expiry in claim predicate | job reclaimed, attempts already +1 (JOB-AC-004) |
+| Job crashes worker every attempt | expired lease with `attempts >= max_attempts` | reaped to `dead` by `claim_job` (JOB-AC-010) |
 | Stage error | handler returns error | `Fail` → retry with backoff or `dead` + `last_error` (JOB-AC-005/006) |
 | Queue empty | Claim returns nil,nil | release slot, jittered sleep |
 | Heartbeat after reclaim | worker id mismatch | stop processing (job was taken over) |
 
 ## 8. Security and multi-tenancy
 
-`tenant_id` on every job; consumers process inside `WithTenant`. Job payload never contains
+`tenant_id` on every job; consumers process inside `WithTenant`. The only cross-tenant access is
+`claim_job`, which returns ids and the (id-only) payload — never document content. Job payload never contains
 document text or secrets — only ids (logging rule in `010`).
 
 ## 9. Testing strategy

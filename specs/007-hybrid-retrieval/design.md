@@ -40,7 +40,7 @@ SQL per shared design (two CTEs `vec`, `fts` with `row_number()`, LEFT JOINs, RR
 
 ```sql
 JOIN documents d ON d.id = c.document_id
-WHERE c.tenant_id = $1 AND d.deleted_at IS NULL AND d.status <> 'deleting'
+WHERE c.tenant_id = $1 AND d.deleted_at IS NULL  -- set with 'deleting'; also covers 'deleted'
 ```
 
 Per-doc cap: `row_number() OVER (PARTITION BY c.document_id ORDER BY score DESC) <= $cap`.

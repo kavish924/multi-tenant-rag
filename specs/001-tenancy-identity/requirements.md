@@ -33,6 +33,8 @@ tenant context used by both API and workers.
 - **TEN-REQ-007:** Every tenant-scoped DB operation runs through `Store.WithTenant(...)`, which sets `app.tenant_id` with `set_config(..., is_local => true)` inside the transaction.
 - **TEN-REQ-008:** RLS is enabled and forced (`FORCE ROW LEVEL SECURITY`) on tenants-owned tables, with a dedicated non-superuser application role.
 - **TEN-REQ-009:** Workers run pipeline DB work through the same `WithTenant` wrapper.
+- **TEN-REQ-010:** Operations that must run before a tenant is known or across tenants (job claim, a user's membership list, outbox relay, retention sweep) go only through a closed set of `SECURITY DEFINER` system functions owned by a `NOLOGIN BYPASSRLS` role `app_system`; the `app` role itself never has `BYPASSRLS` and RLS policies are not loosened for these paths (`docs/system-design.md §1 Cross-tenant system paths`).
+- **TEN-REQ-011:** Tenant resolution reads memberships via `memberships_for_user(user_id)`; creating a tenant generates its id in the application and inserts the tenant + owner membership inside `WithTenant(newTenantID)`.
 
 ### Non-functional
 
@@ -49,6 +51,8 @@ tenant context used by both API and workers.
 - **TEN-AC-006:** WHEN a query is executed without its `WHERE tenant_id` clause under a tenant context, RLS SHALL still restrict rows to the current tenant (isolation test).
 - **TEN-AC-007:** WHEN a pooled connection is reused after a tenant transaction, it SHALL NOT retain the previous tenant setting (isolation test).
 - **TEN-AC-008:** WHEN two users in different tenants request the same resource id, THE SYSTEM SHALL return data only for the requester's tenant.
+- **TEN-AC-009:** WHEN the `app` role queries any tenant-owned table with no `app.tenant_id` set, THE SYSTEM SHALL return zero rows; cross-tenant reads SHALL be possible only through the system functions listed in TEN-REQ-010 (isolation test enumerates the functions `app` can execute and fails on any unlisted one).
+- **TEN-AC-010:** WHEN `memberships_for_user(u)` is called, THE SYSTEM SHALL return only `(tenant_id, role)` rows for user `u`.
 
 ## Out of scope
 

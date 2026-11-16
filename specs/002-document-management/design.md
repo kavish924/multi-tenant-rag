@@ -24,9 +24,11 @@ failed to commit" (and vice versa).
 ## 4. Data model changes
 
 `documents` table (in `0001_init.sql`): `id, tenant_id, filename, content_type, size_bytes,
-object_key, sha256, status CHECK IN ('uploaded','queued','processing','indexed','failed','deleting'),
-error, created_at, deleted_at`, `UNIQUE (tenant_id, sha256)`. Index `(tenant_id, created_at DESC)`
-for listing.
+object_key, sha256, status CHECK IN ('uploaded','queued','processing','indexed','failed','deleting','deleted'),
+error, created_at, deleted_at`, partial unique `(tenant_id, sha256) WHERE deleted_at IS NULL`
+(re-uploading a deleted file is allowed). Index `(tenant_id, created_at DESC)` for listing.
+`deleted` is set by the cleanup job (`013`); `deleted_at IS NOT NULL` is sticky — no later
+status write may clear it.
 
 ## 5. API contract
 
@@ -49,8 +51,10 @@ signature → SHA-256 while streaming to object store → `WithTenant` tx: `INSE
 **Failure path:** tx error → rollback → best-effort `DeleteObject(object_key)` → 500 (client
 retries safely: dedup makes retries idempotent).
 
-**Delete (this spec):** authorize → `UPDATE documents SET deleted_at=now(), status='deleting'`
-→ enqueue `cleanup` job (`013`) → 202. Retrieval exclusion is enforced in `007`; download
+**Delete (this spec):** authorize → in one `WithTenant` tx: `UPDATE documents SET
+deleted_at=now(), status='deleting' WHERE id=$1 AND deleted_at IS NULL` (takes the row lock that
+serializes with the ingestion Index tx, `005`) → enqueue `cleanup` job (`013`) → commit → 202.
+Zero rows updated ⇒ already deleting/deleted ⇒ 202 (idempotent). Retrieval exclusion is enforced in `007`; download
 refusal here (DOC-AC-008).
 
 ## 7. Error handling and failure modes

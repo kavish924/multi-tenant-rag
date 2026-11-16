@@ -62,6 +62,32 @@ Workers and background jobs use the same wrapper.
 - Setting the tenant **outside a transaction** leaks it across pooled connections.
 - Workers/background jobs also need a tenant context — give them the same wrapper.
 
+### Cross-tenant system paths
+
+A few operations must run **before a tenant is known** or **across all tenants**: claiming the
+next job, listing a user's memberships (`/me`, tenant resolution), relaying outbox rows, and the
+retention sweeper. Under forced RLS with no `app.tenant_id` set, these queries silently return
+zero rows. Do **not** fix this by giving the `app` role `BYPASSRLS` or by loosening policies.
+
+Instead, expose each one as a narrow **system function**:
+
+- `SECURITY DEFINER`, owned by a dedicated `app_system` role (`NOLOGIN BYPASSRLS`), with
+  `SET search_path = pg_catalog, public`.
+- `EXECUTE` granted to `app`; nothing else about `app_system` is reachable.
+- Returns only the columns the caller needs (ids, never document text).
+- Everything after the function call (processing the job, reading the document) goes back
+  through `WithTenant(tenantID)`.
+
+| Function | Caller | Returns |
+| -------- | ------ | ------- |
+| `claim_job(worker_id, lease)` | `cmd/worker` | one claimed job (see §4) |
+| `memberships_for_user(user_id)` | `cmd/api` auth middleware | `(tenant_id, role)` rows |
+| `outbox_next(limit)` / `outbox_mark_published(id)` | `cmd/outbox-relay` | unpublished rows / ack |
+| `sweep_candidates(limit)` | worker sweeper | `(tenant_id, document_id)` past retention |
+
+The set of system functions is small and closed; adding one is a reviewed migration, and the
+isolation suite (`015`) asserts the `app` role has no other way to read across tenants.
+
 ## 2. Data model
 
 Start with the smallest schema that supports the pipeline. Record which embedding model
@@ -92,7 +118,7 @@ erDiagram
 
 | Table       | Decision                                                                                                   |
 | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `documents` | `UNIQUE (tenant_id, sha256)` — per-tenant duplicate detection. `status` CHECK: `uploaded → queued → processing → indexed | failed`, plus soft delete (`deleted_at`). |
+| `documents` | Partial unique `(tenant_id, sha256) WHERE deleted_at IS NULL` — per-tenant duplicate detection that still allows re-uploading a deleted file. `status` CHECK: `uploaded`, `queued`, `processing`, `indexed`, `failed`, `deleting`, `deleted`. Soft delete sets `deleted_at` and `deleting` atomically; `deleted_at IS NOT NULL` is sticky — no pipeline write may change the status afterwards. |
 | `chunks`    | `UNIQUE (document_id, ordinal)` — **makes retries idempotent**. `tsv` is a generated column
 (`to_tsvector('english', content)`). `embedding vector(1536)` must match the embedding model's
 dimension. `embed_model` recorded for future re-embedding. |
@@ -104,8 +130,9 @@ dimension. `embed_model` recorded for future re-embedding. |
 
 An approximate index scans nearest neighbors first and applies the tenant filter afterward, so
 a small tenant can get fewer results than requested. Check whether your pgvector version offers
-iterative index scans, test with your smallest tenant, and consider partitioning for very large
-tenants.
+iterative index scans (pgvector ≥ 0.8: `SET LOCAL hnsw.iterative_scan = relaxed_order` inside
+the search transaction), test with your smallest tenant, and consider partitioning for very large
+tenants. Note that the default `hnsw.ef_search` (40) is below the vector leg's `LIMIT 50`.
 
 ## 3. Ingestion pipeline
 
@@ -118,7 +145,7 @@ corrupt a document.
 | Extract | Convert the file to text with page and heading metadata. | Run parsers in isolation with memory and time limits. Parsers are a common attack surface.          |
 | Chunk  | Split into passages of roughly 300–800 tokens with 10–15% overlap. | Prefer paragraph and heading boundaries. Keep the ordinal stable so reprocessing upserts the same rows. |
 | Embed  | Send chunks to the embedding provider in batches.       | Validate each returned vector's dimension. Record the model name. Respect rate limits with bounded retries. |
-| Index  | Write chunks and vectors, then mark the document `indexed`. | Do both in one transaction and check the document has not been deleted meanwhile.                   |
+| Index  | Write chunks and vectors, then mark the document `indexed`. | Do both in one transaction that first locks the document row (`SELECT ... FOR UPDATE`) and cancels if `deleted_at` is set. The lock serializes Index against Delete (see below). |
 
 Chunk size is a **tuning knob, not a constant**. Start with the ranges above and let the
 evaluation set tell you whether to change them.
@@ -130,12 +157,34 @@ uploaded ──▶ queued ──▶ processing ──▶ indexed
                            │
                            └──▶ failed (with recorded reason)
 
-any state ──▶ (soft) deleted  ──▶ physical cleanup (chunks, vectors, object)
+any state ──▶ deleting ──▶ deleted ──▶ (row removed by retention sweeper)
+              soft delete   cleanup job:   after RETENTION_DAYS
+                            chunks, vectors,
+                            object removed
 ```
 
 Deletion is more than removing metadata: clean up chunks, vectors, cached content, associated
 objects, and derived artifacts per the retention policy — and account for in-flight jobs so a
 worker cannot reinsert deleted content after cleanup finishes.
+
+**Why the row lock makes deletion race-free.** The delete transaction
+(`UPDATE documents SET deleted_at = now(), status = 'deleting' ... WHERE deleted_at IS NULL`)
+and the Index transaction (`SELECT ... FOR UPDATE`) both take the document's row lock, so they
+serialize:
+
+- *Index commits first:* its chunks exist when Delete commits. The cleanup job is enqueued in
+  the Delete transaction, so it can only run afterwards, and it deletes those chunks.
+- *Delete commits first:* Index's `FOR UPDATE` waits, then (under READ COMMITTED) reads the
+  latest row version, sees `deleted_at`, and writes nothing.
+
+An unlocked `WHERE NOT EXISTS (... deleted_at IS NOT NULL)` check is **not** enough: it reads a
+snapshot, so a Delete that commits mid-transaction is invisible to it. Every other pipeline
+status write (`processing`, `failed`, `indexed`) carries `AND deleted_at IS NULL` so it can never
+overwrite `deleting`/`deleted`.
+
+Soft-deleted rows are not removed, so `ON DELETE CASCADE` on `chunks` does **not** fire during
+cleanup. The cleanup job deletes chunks explicitly; the cascade is only a safety net for the
+sweeper's eventual hard delete of the document row.
 
 ## 4. Jobs and messaging
 
@@ -144,23 +193,43 @@ claim jobs with a **lease** so abandoned work is recovered automatically.
 
 ### Claiming a job
 
+The claim searches across every tenant, so it runs as a system function (§1) rather than a
+plain query under RLS. The worker calls `SELECT * FROM claim_job($1, interval '60 seconds')`.
+
 ```sql
--- internal/jobs/claim.sql
-UPDATE jobs
-SET status = 'running',
-    locked_by = $1,
-    lease_expires_at = now() + interval '60 seconds',
-    attempts = attempts + 1
-WHERE id = (
-  SELECT id FROM jobs
-  WHERE (status = 'queued'  AND run_at <= now())
-     OR (status = 'running' AND lease_expires_at < now())
-  ORDER BY run_at
-  FOR UPDATE SKIP LOCKED
-  LIMIT 1
-)
-RETURNING id, tenant_id, kind, payload, attempts, max_attempts;
+-- migrations/0004_claim_job.sql  (owned by app_system; EXECUTE granted to app)
+CREATE FUNCTION claim_job(p_worker text, p_lease interval)
+RETURNS TABLE (id uuid, tenant_id uuid, kind text, payload jsonb,
+               attempts int, max_attempts int)
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+  -- 1. Dead-letter jobs whose lease expired on their final attempt. Without this, a job
+  --    that kills its worker every time (OOM, segfault) is reclaimed forever: Fail() never
+  --    runs, so nothing else ever marks it dead.
+  WITH reaped AS (
+    UPDATE jobs SET status = 'dead', locked_by = NULL,
+           last_error = coalesce(last_error, 'lease expired on final attempt')
+    WHERE status = 'running' AND lease_expires_at < now()
+      AND attempts >= max_attempts
+  )
+  -- 2. Claim one runnable job (disjoint from the reaped set by the attempts predicate).
+  UPDATE jobs j
+  SET status = 'running', locked_by = p_worker,
+      lease_expires_at = now() + p_lease, attempts = j.attempts + 1
+  WHERE j.id = (
+    SELECT c.id FROM jobs c
+    WHERE (c.status = 'queued'  AND c.run_at <= now())
+       OR (c.status = 'running' AND c.lease_expires_at < now()
+           AND c.attempts < c.max_attempts)
+    ORDER BY c.run_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+  )
+  RETURNING j.id, j.tenant_id, j.kind, j.payload, j.attempts, j.max_attempts;
+$$;
 ```
+
+`Heartbeat`, `Complete` and `Fail` touch a job the worker already knows the tenant of, so they
+run as ordinary statements inside `WithTenant(job.TenantID)`.
 
 ### Worker core loop
 
@@ -226,16 +295,18 @@ fts AS (
 SELECT c.id, c.document_id, c.content, c.page, c.heading,
        COALESCE(1.0 / (60 + vec.rnk), 0) + COALESCE(1.0 / (60 + fts.rnk), 0) AS score
 FROM chunks c
+JOIN documents d ON d.id = c.document_id
 LEFT JOIN vec ON vec.id = c.id
 LEFT JOIN fts ON fts.id = c.id
 WHERE c.tenant_id = $1
+  AND d.deleted_at IS NULL          -- set atomically with 'deleting'; also covers 'deleted'
   AND (vec.id IS NOT NULL OR fts.id IS NOT NULL)
 ORDER BY score DESC
 LIMIT $4;
 ```
 
-- Join to `documents` and **exclude soft-deleted or `deleting` documents** so removed content
-  can never be retrieved.
+- The join to `documents` **excludes soft-deleted (`deleting`/`deleted`) documents** so removed
+  content can never be retrieved, even in the window before cleanup removes the chunks.
 - Then optionally rerank the top candidates with a cross-encoder or an LLM, keeping the best
   handful for the prompt. **Measure whether reranking earns its latency and cost before keeping
   it.**
@@ -281,8 +352,10 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
     }
 }
 
+// Each SSE event ends with a blank line; without it clients never dispatch the event.
+// data must be single-line (JSON-encode tokens) or be split into one "data:" line per line.
 func writeSSE(w io.Writer, event string, data []byte) {
-    fmt.Fprintf(w, "event: %s\ndata: %s\n", event, data)
+    fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
 }
 ```
 

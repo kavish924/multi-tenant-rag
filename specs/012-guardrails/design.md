@@ -56,6 +56,20 @@ on near-final text → on Block, emit refusal event and discard buffer; on Redac
 cleaned tail; on Allow, flush. Rationale: output guards need enough text to be meaningful; the
 buffer trades a few hundred ms for safety, configurable.
 
+**Limit of the streaming buffer — be explicit about it.** Only the buffered tail can be withheld.
+Once a token leaves the buffer it has reached the client, so a Block decided later can stop the
+stream and emit a `refusal` event (the client must discard what it rendered) but cannot un-send
+earlier text. "Fail closed" therefore holds fully only for answers shorter than the buffer.
+Two modes, selected per tenant/config (`GUARD_OUTPUT_MODE`):
+
+| Mode | Behaviour | Use when |
+| ---- | --------- | -------- |
+| `windowed` (default) | ≈256-token buffer; late Block ⇒ stop + `refusal` event + client discards | latency matters; redaction/citation patterns are local |
+| `strict` | buffer the **whole** answer, run output stages, then stream it | regulated tenants; zero tolerance for any unguarded byte |
+
+Citation verification is unaffected either way: citations are emitted as separate events only
+after the answer completes and are resolved server-side (`008`).
+
 **Fail closed:** `Run` maps any `err` to `(Block, "", err)`; handler converts to refusal +
 `guard_verdicts_total` increment (GRD-AC-001/002).
 
@@ -63,7 +77,7 @@ buffer trades a few hundred ms for safety, configurable.
 
 | Failure | Detection | Response |
 | ------- | --------- | -------- |
-| Guard panic | recover in `Run` | Block + log (never stream partial) |
+| Guard panic | recover in `Run` | Block + log; stop stream + `refusal` (text already past the buffer cannot be recalled — see §6) |
 | Faithfulness check timeout | ctx deadline | Block (or warn-only per rollout config) |
 | Hygiene violation | post-search assert | Block + alert (bug signal, GRD-AC-004) |
 | Redaction impossible mid-stream | config | Block whole answer |
@@ -84,5 +98,5 @@ purity is asserted, not assumed (GRD-AC-004).
 
 ## 10. Open questions
 
-- Streaming granularity vs output-guard safety → **default:** bounded buffer (≈256 tokens) +
-  configurable; document trade-off in README.
+- Streaming granularity vs output-guard safety → **default:** `windowed` mode, bounded buffer
+  (≈256 tokens), with `strict` (whole-answer) mode available; document trade-off in README.

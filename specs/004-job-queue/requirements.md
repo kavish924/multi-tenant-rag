@@ -23,7 +23,7 @@ crash recovery via lease expiry. No broker infrastructure required.
 ### Functional
 
 - **JOB-REQ-001:** `Queue.Enqueue(ctx, tx, job)` inserts within the caller's transaction: `kind`, `payload` (jsonb), `tenant_id`, optional `idempotency_key`, `run_at` (default now).
-- **JOB-REQ-002:** `Claim(ctx, workerID)` atomically claims one runnable job using the claim SQL (`status='queued' AND run_at<=now()` OR expired lease), sets `running`, 60s lease, `attempts+1`.
+- **JOB-REQ-002:** `Claim(ctx, workerID)` atomically claims one runnable job by calling the `claim_job` system function (`TEN-REQ-010`; the claim scans all tenants, so it cannot run under RLS): `status='queued' AND run_at<=now()` OR (expired lease AND `attempts < max_attempts`), sets `running`, 60s lease, `attempts+1`.
 - **JOB-REQ-003:** Two workers claiming concurrently each get distinct jobs (never the same job twice simultaneously).
 - **JOB-REQ-004:** `Heartbeat(ctx, jobID, workerID)` extends the lease while work is in progress.
 - **JOB-REQ-005:** `Complete` sets `succeeded`; `Fail` either schedules a retry (`queued`, `run_at = now() + backoff`) or marks `dead` when `attempts >= max_attempts`.
@@ -32,6 +32,7 @@ crash recovery via lease expiry. No broker infrastructure required.
 - **JOB-REQ-008:** Recovery sweep: expired leases make jobs claimable again (covered by claim predicate) — a crashed worker's job is retried by another worker.
 - **JOB-REQ-009:** Worker core loop: bounded semaphore; reserve capacity **before** claiming; poll interval with jitter; graceful shutdown finishes in-flight jobs.
 - **JOB-REQ-010:** Jobs carry `tenant_id`; processing runs inside the tenant context wrapper (`TEN-REQ-009`).
+- **JOB-REQ-011:** Poison-pill protection: a job whose lease expires on its final attempt (`attempts >= max_attempts`) is marked `dead` by the same `claim_job` call, because a job that crashes its worker never reaches `Fail`.
 
 ### Non-functional
 
@@ -49,6 +50,8 @@ crash recovery via lease expiry. No broker infrastructure required.
 - **JOB-AC-007:** WHEN `Enqueue` is called twice with the same `(tenant_id, idempotency_key)`, THE SYSTEM SHALL create one job and return the same id both times.
 - **JOB-AC-008:** WHEN a heartbeat arrives within the lease window, THE SYSTEM SHALL extend `lease_expires_at` and the job SHALL NOT be reclaimed while the worker lives.
 - **JOB-AC-009:** WHEN shutdown is requested, THE SYSTEM SHALL stop claiming and finish in-flight jobs before exit.
+- **JOB-AC-010:** WHEN a job's lease expires after its final allowed attempt, THE SYSTEM SHALL mark it `dead` with `last_error` set and SHALL NOT hand it to any worker again (kill-every-attempt test).
+- **JOB-AC-011:** WHEN the worker claims with no tenant context set, THE SYSTEM SHALL still find runnable jobs of every tenant via `claim_job`, while a plain `SELECT FROM jobs` by the same role returns zero rows.
 
 ## Out of scope
 

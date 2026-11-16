@@ -182,7 +182,9 @@ stateDiagram-v2
     queued --> deleting: soft delete requested
     processing --> deleting: soft delete requested
     indexed --> deleting: soft delete requested
-    deleting --> [*]: chunks, vectors, cached content, object cleaned up
+    failed --> deleting: soft delete requested
+    deleting --> deleted: cleanup job — chunks, vectors, cached content, object removed
+    deleted --> [*]: retention sweeper hard-deletes the row
 ```
 
 ### Job lifecycle

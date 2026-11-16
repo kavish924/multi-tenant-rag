@@ -17,7 +17,9 @@ category, so the in-flight-job interaction is designed, not improvised.
 
 - `internal/documents`: delete service (from `002`) + purge service.
 - `internal/ingestion/cleanup`: stage implementations for the `cleanup` job kind.
-- Sweeper: periodic job (`run_at` scheduled by relay-less cron loop in worker).
+- Sweeper: periodic job (`run_at` scheduled by relay-less cron loop in worker). It spans
+  tenants, so it finds work via the `sweep_candidates(limit)` system function (`TEN-REQ-010`,
+  returns `(tenant_id, document_id)` only) and does each removal inside `WithTenant`.
 
 ## 4. Data model changes
 
@@ -31,14 +33,24 @@ None structural. Status lifecycle gains terminal `deleted`. Retention via config
 ## 6. Key flows
 
 **Delete:** soft-delete (`deleting`) → outbox `document.deleting` + `cleanup` job (idempotency key
-`cleanup:{document_id}`) → job: delete chunks tx → cache purge → object delete → status
-`deleted`. Chunks deletion relies on `ON DELETE CASCADE` from documents, but the job asserts
-zero rows explicitly (belt and braces).
+`cleanup:{document_id}`) → job: `DELETE FROM chunks WHERE document_id=$1` (explicit, batched)
+→ cache purge → object delete → status `deleted`. The document row is only soft-deleted, so
+`ON DELETE CASCADE` does not fire here; it remains as a safety net for the sweeper's eventual
+hard delete. The job asserts zero rows at the end.
 
-**Race handling:** delete during embed ⇒ Index pre-check cancels (ING-AC-005); delete during
-Index commit ⇒ chunks landed, but cleanup job deletes them after; ordering guaranteed because
-cleanup is enqueued in the delete tx and the queue serializes per idempotency key. Final
-invariant checked at end of cleanup (`SELECT count(*) FROM chunks WHERE document_id=$1` = 0).
+**Race handling:** ordering comes from the **document row lock**, not from the queue — the
+ingest job and the `cleanup:{document_id}` job are different jobs with different idempotency
+keys, so nothing in the queue orders them.
+
+| Interleaving | What happens |
+| ------------ | ------------ |
+| Delete during extract/chunk/embed | Index's `FOR UPDATE` read sees `deleted_at` → no chunks (ING-AC-005) |
+| Delete while Index holds the lock | Delete waits; Index commits chunks; Delete commits + enqueues cleanup; cleanup deletes them |
+| Delete commits, Index then takes the lock | Index re-reads the latest row, sees `deleted_at` → no chunks (ING-AC-009) |
+| Ingest retried after delete | job start sees `deleted_at` → completes as cancelled (ING-REQ-010) |
+
+Final invariant checked at end of cleanup (`SELECT count(*) FROM chunks WHERE document_id=$1` = 0);
+non-zero ⇒ job fails and retries (it indicates a bug, so it also alerts).
 
 ## 7. Error handling and failure modes
 

@@ -23,8 +23,8 @@ must never reinsert deleted content after cleanup finishes.
 ### Functional
 
 - **DEL-REQ-001:** Delete marks the document `deleting` + `deleted_at` immediately (soft delete) and enqueues a `cleanup` job — content becomes non-retrievable at once (retrieval already excludes `deleting`).
-- **DEL-REQ-002:** Cleanup job: delete chunks (cascade covers rows; explicitly delete vectors via same rows), any cached answer/embedding entries for the document, then the stored object (`ObjectStore.Delete`, idempotent).
-- **DEL-REQ-003:** In-flight safety: the ingestion Index stage re-checks `deleted_at IS NULL` inside its transaction (`ING-AC-005`); cleanup runs **after** in-flight job leases expire or is retried until no chunks exist — final invariant: no chunk rows remain.
+- **DEL-REQ-002:** Cleanup job: explicitly `DELETE FROM chunks WHERE document_id = $1` (batched; vectors live in the same rows), any cached answer/embedding entries for the document, then the stored object (`ObjectStore.Delete`, idempotent), then status `deleted`. `ON DELETE CASCADE` is **not** relied on: the document row is soft-deleted and survives until the retention sweeper hard-deletes it (DEL-REQ-007), so the cascade never fires during cleanup.
+- **DEL-REQ-003:** In-flight safety: Delete and the ingestion Index transaction both take the document's row lock (`002`, `ING-REQ-008`), so they serialize — either Index commits first and its chunks exist before the cleanup job (enqueued in the Delete tx) can run, or Delete commits first and Index writes nothing. No wait on lease expiry is needed. Final invariant, asserted at the end of cleanup: zero chunk rows remain.
 - **DEL-REQ-004:** After successful cleanup, document status moves to `deleted` (metadata retained per retention policy; default: 30 days, configurable).
 - **DEL-REQ-005:** Tenant purge (admin+): soft-delete all tenant documents, purge memberships? — **no**: purge content + objects + usage rows; tenant/user metadata anonymized or retained per policy flag.
 - **DEL-REQ-006:** The purge/cleanup consumer is the idempotency reference implementation for outbox consumers: `document.deleting` events dedupe on `event_id` (per `006`).
@@ -39,7 +39,7 @@ must never reinsert deleted content after cleanup finishes.
 
 - **DEL-AC-001:** WHEN an authorized user deletes a document, THE SYSTEM SHALL exclude it from search and content download immediately.
 - **DEL-AC-002:** WHEN cleanup finishes, THE SYSTEM SHALL have zero chunk rows, no cached entries, and no stored object for the document.
-- **DEL-AC-003:** WHEN an ingestion job is mid-flight during deletion, THE SYSTEM SHALL never leave deleted content in the index after cleanup completes (race test: delete during embed → final state has no chunks).
+- **DEL-AC-003:** WHEN an ingestion job is mid-flight during deletion, THE SYSTEM SHALL never leave deleted content in the index after cleanup completes and SHALL never move the document out of `deleting`/`deleted` (race tests: delete during embed; delete while Index holds the row lock; delete while Index waits on it → final state has no chunks).
 - **DEL-AC-004:** WHEN cleanup partially fails (e.g. object delete), THE SYSTEM SHALL retry via the job ladder until the invariant (AC-002) holds, then mark `deleted`.
 - **DEL-AC-005:** WHEN a duplicate `document.deleting` event is consumed, THE SYSTEM SHALL perform no duplicate side effects (idempotency reference test).
 - **DEL-AC-006:** WHEN a tenant purge completes, THE SYSTEM SHALL leave no content chunks, no objects, and no usage rows for that tenant.
