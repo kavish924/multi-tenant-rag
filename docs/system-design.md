@@ -24,10 +24,12 @@ ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY tenant_isolation ON documents
-  USING      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING      (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
 
 -- Repeat for chunks, jobs, usage_events, and every tenant-owned table.
+-- NULLIF: after a tenant transaction ends, a pooled connection's setting is ''
+-- (not NULL), and ''::uuid would raise instead of matching zero rows.
 ```
 
 ### Transaction-scoped tenant context
@@ -72,7 +74,7 @@ zero rows. Do **not** fix this by giving the `app` role `BYPASSRLS` or by loosen
 Instead, expose each one as a narrow **system function**:
 
 - `SECURITY DEFINER`, owned by a dedicated `app_system` role (`NOLOGIN`), with
-  `SET search_path = pg_catalog, public`.
+  `SET search_path = pg_catalog, public, pg_temp` (pg_temp last, so a caller's temp table cannot shadow a table the function reads).
 - `app_system` does **not** have `BYPASSRLS` (managed Postgres such as Cloud SQL has no true
   superuser to grant it). It sees across tenants only through policies scoped to that role:
 
@@ -213,7 +215,7 @@ plain query under RLS. The worker calls `SELECT * FROM claim_job($1, interval '6
 CREATE FUNCTION claim_job(p_worker text, p_lease interval)
 RETURNS TABLE (id uuid, tenant_id uuid, kind text, payload jsonb,
                attempts int, max_attempts int)
-LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
   -- 1. Dead-letter jobs whose lease expired on their final attempt. Without this, a job
   --    that kills its worker every time (OOM, segfault) is reclaimed forever: Fail() never
   --    runs, so nothing else ever marks it dead.

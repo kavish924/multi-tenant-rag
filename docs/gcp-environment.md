@@ -128,6 +128,10 @@ cross-tenant path uses role-scoped policies instead (see
 [system-design.md §1](system-design.md#cross-tenant-system-paths)). `app` must never be a member of
 `app_system` — the isolation suite checks it.
 
+The migrations create the `app` and `app_system` roles, so `migrator` needs `CREATEROLE` (grant it
+once from the built-in `postgres` user during bootstrap). The migrate job then adds the IAM users
+listed in `APP_DB_LOGIN_ROLES` to `app`.
+
 **Dev cost control:** the dev instance uses a small machine tier and can be stopped outside
 working hours (Terraform variable or a scheduled job).
 
