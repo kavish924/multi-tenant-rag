@@ -323,6 +323,8 @@ LIMIT $4;
 
 - The join to `documents` **excludes soft-deleted (`deleting`/`deleted`) documents** so removed
   content can never be retrieved, even in the window before cleanup removes the chunks.
+- As built (`internal/retrieval`), each leg also filters deleted documents, the SQL returns both
+  leg ranks, and Go does the RRF sum and the per-document cap (default 5); see spec 007 design §5.
 - Then optionally rerank the top candidates with a cross-encoder or an LLM, keeping the best
   handful for the prompt. **Measure whether reranking earns its latency and cost before keeping
   it.**

@@ -12,8 +12,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -23,6 +21,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/extract"
 	"github.com/kavish924/multi-tenant-rag/internal/jobs"
 	"github.com/kavish924/multi-tenant-rag/internal/messaging"
+	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 )
 
@@ -240,7 +239,7 @@ func (p *Pipeline) index(ctx context.Context, tx jobs.TenantTx, tenantID, docID 
 					  embed_model = EXCLUDED.embed_model, embedding = EXCLUDED.embedding,
 					  updated_at = now()`,
 					tenantID, docID, c.Ordinal, c.Content, c.TokenCount,
-					nullInt(c.Page), nullString(c.Heading), model, VectorLiteral(vecs[i]))
+					nullInt(c.Page), nullString(c.Heading), model, storage.VectorLiteral(vecs[i]))
 			}
 			if err := t.SendBatch(ctx, b).Close(); err != nil {
 				return fmt.Errorf("upsert chunks: %w", err)
@@ -292,21 +291,6 @@ func (p *Pipeline) log() *slog.Logger {
 		return p.Log
 	}
 	return slog.Default()
-}
-
-// VectorLiteral formats a vector in pgvector's text form, "[x,y,...]".
-func VectorLiteral(v []float32) string {
-	var b strings.Builder
-	b.Grow(len(v) * 10)
-	b.WriteByte('[')
-	for i, x := range v {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(strconv.FormatFloat(float64(x), 'g', -1, 32))
-	}
-	b.WriteByte(']')
-	return b.String()
 }
 
 func nullInt(n int) any {

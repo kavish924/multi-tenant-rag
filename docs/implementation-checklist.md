@@ -119,9 +119,9 @@ pulled forward here.
 - [ ] Specs 007–009 and **014** **Approved** (the exit gate needs the golden dataset)
 - [ ] **Start early:** [014](../specs/014-evaluation/tasks.md) 1.1 — `golden.jsonl` (≥ 50 cases, 2+ tenants) + fixture corpus + thresholds
 - [ ] **[007 Hybrid retrieval](../specs/007-hybrid-retrieval/tasks.md)**
-  - [ ] `hybrid.sql` (vector + full text + RRF), deleted-document join, per-document cap (Group 1)
-  - [ ] Iterative scan or over-fetch decision, tested with the **smallest tenant** (2.1)
-  - [ ] RRF unit tests, seeded multi-tenant suite, latency benchmark (Group 3)
+  - [x] `hybrid.sql` (vector + full text + RRF), deleted-document join, per-document cap (Group 1)
+  - [ ] Iterative scan or over-fetch decision, tested with the **smallest tenant** (2.1) *(decided and coded; test not yet run)*
+  - [ ] RRF unit tests, seeded multi-tenant suite, latency benchmark (Group 3) *(unit tests pass; suite written, not run; benchmark pending)*
 - [ ] **[008 Generation & citations](../specs/008-generation-citations/tasks.md)**
   - [ ] Grounded prompt builder with untrusted-data delimiters (1.1)
   - [ ] Vertex AI `Generator` stream (tokens + terminal error + usage) + mock (1.2)

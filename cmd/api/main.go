@@ -15,6 +15,8 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/config"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
+	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
@@ -53,6 +55,10 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	// Questions must be embedded by the same provider as ingestion
+	// (cmd/worker): llm.Fake until the Vertex AI provider lands.
+	var embedder llm.EmbeddingProvider = llm.Fake{}
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.New(api.Deps{
@@ -60,6 +66,7 @@ func run(log *slog.Logger) error {
 			Tokens:    tokens,
 			Tenants:   tenants.NewService(store),
 			Documents: documents.NewService(store, objects, cfg.MaxUploadBytes),
+			Retriever: retrieval.NewHybrid(store, embedder, retrieval.Options{}, log),
 			Ready:     store.Ping,
 			Log:       log,
 		}),

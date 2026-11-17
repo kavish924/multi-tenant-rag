@@ -15,8 +15,10 @@ Correctness boundary: **tenant-scoped, deleted-excluded, dominance-capped** resu
 
 ## 3. Components
 
-- `internal/retrieval`: `Retriever` interface, `hybrid.sql` (embedded), per-doc cap post-pass,
-  `Hit` type.
+- `internal/retrieval`: `Retriever` interface, `Hybrid` implementation, `hybrid.sql` (embedded),
+  `Fuse` (RRF + per-doc cap, in Go so the math is unit-tested), `Hit` type.
+- `POST /search` (`{"question", "limit"}` → `{"hits": [...]}`, member role, tenant from
+  `X-Tenant-ID` or the sole membership): the retrieval half of `/ask`, for debugging and `014`.
 - Question embedding via `llm.EmbeddingProvider` (same provider/config as ingestion).
 
 ## 4. Data model changes
@@ -44,6 +46,16 @@ WHERE c.tenant_id = $1 AND d.deleted_at IS NULL  -- set with 'deleting'; also co
 ```
 
 Per-doc cap: `row_number() OVER (PARTITION BY c.document_id ORDER BY score DESC) <= $cap`.
+
+**As built:** `hybrid.sql` returns the union of both legs' candidates with each leg's rank;
+`retrieval.Fuse` computes the RRF score, sorts (ties: vector rank, text rank, chunk id), applies
+the per-document cap and the limit. Both legs exclude deleted documents (`NOT EXISTS ...
+deleted_at IS NOT NULL`) so deleted chunks never use up candidate slots, and the outer query joins
+`documents` again as the final filter. The vector leg is a `MATERIALIZED` CTE ordered by distance
+with `LIMIT 50` so the HNSW index is used; the question is embedded with the ingestion provider.
+`Hit` also carries `filename` (for citations) and `vector_rank` / `text_rank` (for evaluation).
+Limits: default 50, max 100 (both legs). Questions are trimmed; empty, invalid UTF-8 or more than
+2,000 characters fail before any provider call (`012` may tighten this).
 
 ## 6. Key flows
 
@@ -74,3 +86,8 @@ retrieval layer). Direct chunk-id probing tests prove cross-tenant invisibility 
 ## 10. Open questions
 
 - Query expansion / HyPC for vector leg → **default:** none; evaluation (`014`) decides.
+- Small-tenant recall (RET-REQ-007) → **decided:** per search transaction, `SET LOCAL
+  hnsw.ef_search = 100`; if pgvector ≥ 0.8 (detected once from `pg_extension`) also
+  `hnsw.iterative_scan = relaxed_order`, otherwise widen `ef_search` to 400 as the over-fetch
+  mitigation. The vector leg always returns the nearest chunks, so an unrelated question still
+  gets hits; deciding there is no answer is generation's job (`008`).

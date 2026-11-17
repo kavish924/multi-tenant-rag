@@ -21,6 +21,8 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/api"
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
+	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 	"github.com/kavish924/multi-tenant-rag/internal/testutil/pgtest"
@@ -62,6 +64,7 @@ func TestMain(m *testing.M) {
 		Tokens:    tokens,
 		Tenants:   tenants.NewService(env.Store),
 		Documents: documents.NewService(env.Store, objects, maxUpload),
+		Retriever: retrieval.NewHybrid(env.Store, llm.Fake{}, retrieval.Options{}, nil),
 		Ready:     env.Store.Ping,
 		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))

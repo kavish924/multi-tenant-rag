@@ -15,6 +15,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
+	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
 
@@ -23,7 +24,8 @@ type Deps struct {
 	Users     *auth.Service
 	Tokens    TokenVerifier
 	Tenants   *tenants.Service
-	Documents *documents.Service // optional: document routes are mounted only when set
+	Documents *documents.Service  // optional: document routes are mounted only when set
+	Retriever retrieval.Retriever // optional: POST /search is mounted only when set
 	Ready     func(context.Context) error
 	Log       *slog.Logger
 }
@@ -66,6 +68,9 @@ func New(d Deps) http.Handler {
 		mux.Handle("GET /documents/{id}", tenantRoute(tenants.RoleMember, s.getDocument))
 		mux.Handle("DELETE /documents/{id}", tenantRoute(tenants.RoleMember, s.deleteDocument))
 		mux.Handle("GET /documents/{id}/content", tenantRoute(tenants.RoleMember, s.documentContent))
+	}
+	if d.Retriever != nil {
+		mux.Handle("POST /search", tenantRoute(tenants.RoleMember, s.search))
 	}
 
 	return logRequests(d.Log, mux)
