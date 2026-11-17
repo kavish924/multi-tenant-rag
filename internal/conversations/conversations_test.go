@@ -17,16 +17,21 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kavish924/multi-tenant-rag/internal/guard"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
 	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
 
+// testTenant owns every hit the helpers build; the test servers resolve
+// requests to it, so the retrieval hygiene guard sees a pure result.
+var testTenant = uuid.New()
+
 func hits(contents ...string) []retrieval.Hit {
 	out := make([]retrieval.Hit, len(contents))
 	for i, c := range contents {
-		out[i] = retrieval.Hit{ChunkID: uuid.New(), DocumentID: uuid.New(), Filename: "f.txt", Content: c, Page: i + 1, Rank: i + 1}
+		out[i] = retrieval.Hit{ChunkID: uuid.New(), DocumentID: uuid.New(), TenantID: testTenant, Filename: "f.txt", Content: c, Page: i + 1, Rank: i + 1}
 	}
 	return out
 }
@@ -175,7 +180,7 @@ type sse struct {
 }
 
 func server(h *Handler) *httptest.Server {
-	tenant := uuid.New()
+	tenant := testTenant
 	h.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(tenants.WithMembership(r.Context(), tenants.Membership{TenantID: tenant, Role: tenants.RoleMember}))
@@ -320,8 +325,20 @@ func TestAskMidStreamFailure(t *testing.T) {
 	}})
 	defer srv.Close()
 	_, evs := ask(t, srv, "q")
-	if kinds(evs) != "token,error" || evs[len(evs)-1].data["message"] != "generation failed" {
+	// The two generated fragments were still inside the guard window, so
+	// they are discarded unsent (they never passed the output checks).
+	if kinds(evs) != "error" || evs[len(evs)-1].data["message"] != "generation failed" {
 		t.Errorf("events %v", evs)
+	}
+
+	// Once text has left the window, it precedes the single error event.
+	srv2 := server(&Handler{Retriever: fakeRetriever{hits: hits("x")}, Generator: llm.FakeGenerator{
+		Respond:   func(llm.GenerateRequest) string { return strings.Repeat("word ", 500) },
+		FailAfter: 400, // past the 1024-byte default window
+	}})
+	defer srv2.Close()
+	if _, evs := ask(t, srv2, "q"); kinds(evs) != "token,error" {
+		t.Errorf("windowed failure events %v", evs)
 	}
 }
 
@@ -334,7 +351,7 @@ func TestAskDisconnectCancelsGeneration(t *testing.T) {
 		Started: func(ctx context.Context) {
 			go func() { <-ctx.Done(); cancelled <- time.Now() }()
 		},
-	}})
+	}, Guards: &guard.Policy{WindowBytes: guard.MinWindowBytes}}) // first text after ~1 s
 	defer srv.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())

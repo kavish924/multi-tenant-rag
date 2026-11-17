@@ -196,6 +196,10 @@ func TestCrossTenant(t *testing.T) {
 	if len(hits) != 1 || rankOf(hits, bDoc) != 0 {
 		t.Fatalf("tenant A saw %d hits: %+v", len(hits), hits)
 	}
+	// The row's own tenant and deleted flag are returned for the hygiene guard (012).
+	if hits[0].TenantID != a || hits[0].Deleted {
+		t.Errorf("hit tenant %s deleted %v, want %s false", hits[0].TenantID, hits[0].Deleted, a)
+	}
 	// Tenant B's chunk ids, probed directly inside tenant A's context.
 	rows, _ := env.Admin.Query(ctx, `SELECT id FROM chunks WHERE tenant_id = $1`, b)
 	ids, _ := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])

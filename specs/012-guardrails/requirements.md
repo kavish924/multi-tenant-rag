@@ -1,7 +1,7 @@
 # 012 — Guardrails (Fail-Closed Pipeline): Requirements
 
 - **Spec ID:** 012 `GRD`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 5 — Release-quality capstone
 - **Depends on:** `specs/007`, `008`, `011`
 - **Shared context:** `docs/system-design.md §10` (guardrail layers, core rule: **the model is not a security boundary**)

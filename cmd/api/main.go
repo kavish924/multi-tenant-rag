@@ -17,6 +17,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/config"
 	"github.com/kavish924/multi-tenant-rag/internal/conversations"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
+	"github.com/kavish924/multi-tenant-rag/internal/guard"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/quotas"
@@ -88,6 +89,7 @@ func run(log *slog.Logger) error {
 		Generator:  generator,
 		Usage:      recorder,
 		Quotas:     limiter,
+		Guards:     guardPolicy(cfg.Guards, generator, log),
 		Rerank:     rerankStage(cfg.Rerank, generator, recorder, log),
 		EmbedModel: embedder.Model(),
 		Log:        log,
@@ -167,4 +169,23 @@ func telemetry(service string) (*slog.Logger, func(), error) {
 		defer cancel()
 		_ = shutdown(ctx)
 	}, nil
+}
+
+// guardPolicy builds the guardrail policy (spec 012). The faithfulness
+// judge reuses the generation provider (and its circuit breaker).
+func guardPolicy(c config.Guards, judge llm.Generator, log *slog.Logger) *guard.Policy {
+	p := &guard.Policy{
+		Probing:      guard.NewProbing(c.ProbeLimit, time.Minute),
+		OutputMode:   guard.OutputMode(c.OutputMode),
+		WindowBytes:  c.WindowTokens * 4,
+		RedactEmails: c.RedactEmails,
+		Faithfulness: guard.FaithfulnessMode(c.Faithfulness),
+		JudgeTimeout: c.FaithfulnessTimeout,
+		Log:          log,
+	}
+	if p.Faithfulness != guard.FaithfulnessOff {
+		p.Judge = judge
+	}
+	log.Info("guard policy", "output_mode", c.OutputMode, "window_tokens", c.WindowTokens, "faithfulness", c.Faithfulness)
+	return p
 }

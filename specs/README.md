@@ -38,7 +38,7 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | [009](./009-reranking/) | Reranking (optional stage) | 3 — RAG end to end | In progress |
 | [010](./010-observability/) | Observability | 4 — Observable production | In progress |
 | [011](./011-quotas-cost-control/) | Quotas & cost control | 4 — Observable production | In progress |
-| [012](./012-guardrails/) | Guardrails (fail-closed pipeline) | 5 — Release-quality capstone | Draft |
+| [012](./012-guardrails/) | Guardrails (fail-closed pipeline) | 5 — Release-quality capstone | In progress |
 | [013](./013-deletion-cleanup/) | Deletion & cleanup | 5 — Release-quality capstone | Draft |
 | [014](./014-evaluation/) | Evaluation harness | 5 — Release-quality capstone | Draft |
 | [015](./015-isolation-redteam/) | Isolation tests & red teaming | 5 — Release-quality capstone | Draft |

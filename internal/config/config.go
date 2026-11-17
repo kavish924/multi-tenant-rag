@@ -37,6 +37,7 @@ type API struct {
 	MaxUploadBytes int64
 	Rerank         Rerank
 	Quotas         Quotas
+	Guards         Guards
 }
 
 // Rerank configures the optional rerank stage (spec 009). It is per
@@ -208,6 +209,9 @@ func LoadAPI() (API, error) {
 	if cfg.Quotas, err = LoadQuotas(); err != nil {
 		return API{}, err
 	}
+	if cfg.Guards, err = LoadGuards(); err != nil {
+		return API{}, err
+	}
 	return cfg, nil
 }
 
@@ -337,4 +341,48 @@ func LoadQuotas() (Quotas, error) {
 		q.BreakerOpenFor = d
 	}
 	return q, nil
+}
+
+// Guards configures the guardrail policy (spec 012).
+type Guards struct {
+	OutputMode          string        // GUARD_OUTPUT_MODE: windowed (default) or strict
+	WindowTokens        int           // GUARD_WINDOW_TOKENS: windowed buffer, default 256
+	RedactEmails        bool          // GUARD_REDACT_EMAILS, default false
+	Faithfulness        string        // GUARD_FAITHFULNESS: off (default), warn or block
+	FaithfulnessTimeout time.Duration // GUARD_FAITHFULNESS_TIMEOUT, default 1.5s
+	ProbeLimit          int           // GUARD_PROBE_LIMIT: blocks per user per minute before 429, default 10
+}
+
+// LoadGuards reads the guard settings.
+func LoadGuards() (Guards, error) {
+	g := Guards{
+		OutputMode: env("GUARD_OUTPUT_MODE", "windowed"), WindowTokens: 256,
+		Faithfulness: env("GUARD_FAITHFULNESS", "off"), FaithfulnessTimeout: 1500 * time.Millisecond, ProbeLimit: 10,
+	}
+	if g.OutputMode != "windowed" && g.OutputMode != "strict" {
+		return Guards{}, errors.New("config: GUARD_OUTPUT_MODE must be windowed or strict")
+	}
+	if g.Faithfulness != "off" && g.Faithfulness != "warn" && g.Faithfulness != "block" {
+		return Guards{}, errors.New("config: GUARD_FAITHFULNESS must be off, warn or block")
+	}
+	var err error
+	if g.WindowTokens, err = intEnv("GUARD_WINDOW_TOKENS", g.WindowTokens, 64, 8192); err != nil {
+		return Guards{}, err
+	}
+	if g.ProbeLimit, err = intEnv("GUARD_PROBE_LIMIT", g.ProbeLimit, 1, 10_000); err != nil {
+		return Guards{}, err
+	}
+	if v := os.Getenv("GUARD_REDACT_EMAILS"); v != "" {
+		if g.RedactEmails, err = strconv.ParseBool(v); err != nil {
+			return Guards{}, errors.New("config: GUARD_REDACT_EMAILS must be a boolean")
+		}
+	}
+	if v := os.Getenv("GUARD_FAITHFULNESS_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 || d > 30*time.Second {
+			return Guards{}, errors.New("config: GUARD_FAITHFULNESS_TIMEOUT must be a duration in (0, 30s]")
+		}
+		g.FaithfulnessTimeout = d
+	}
+	return g, nil
 }

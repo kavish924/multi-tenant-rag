@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -38,7 +37,7 @@ func TestAskTelemetry(t *testing.T) {
 		Rerank:    &reranking.Stage{Enabled: true, Reranker: &reverser{}},
 		Log:       observability.NewLogger(&logs, nil),
 	}
-	tenant := uuid.New()
+	tenant := testTenant
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /ask", func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(tenants.WithMembership(r.Context(), tenants.Membership{TenantID: tenant, Role: tenants.RoleMember}))

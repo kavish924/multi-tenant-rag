@@ -162,10 +162,10 @@ pulled forward here.
 
 - [ ] Specs 012, 013, 015 **Approved**
 - [ ] **[012 Guardrails](../specs/012-guardrails/tasks.md)**
-  - [ ] `guard.Run` fail-closed core (Group 1)
-  - [ ] Input, retrieval-hygiene, prompt, tools (deny-all), output, faithfulness, budget stages (Group 2)
-  - [ ] Ask-path wiring with `windowed` / `strict` output modes; verdict metrics (Group 3)
-  - [ ] Semantics, stage, injection, overhead tests (Group 4)
+  - [x] `guard.Run` fail-closed core (Group 1)
+  - [x] Input, retrieval-hygiene, prompt, tools (deny-all), output, faithfulness, budget stages (Group 2)
+  - [x] Ask-path wiring with `windowed` / `strict` output modes; verdict metrics (Group 3)
+  - [x] Semantics, stage, injection, overhead tests (Group 4)
 - [ ] **[013 Deletion & cleanup](../specs/013-deletion-cleanup/tasks.md)**
   - [ ] `cleanup` job: explicit chunk delete + invariant + object delete → `deleted` (Group 1)
   - [ ] Tenant purge; retention sweeper via `sweep_candidates` (Group 2)

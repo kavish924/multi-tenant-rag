@@ -8,9 +8,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/breaker"
+	"github.com/kavish924/multi-tenant-rag/internal/guard"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
@@ -45,6 +49,9 @@ type Handler struct {
 	MaxContextTokens int
 	MaxOutputTokens  int
 	Log              *slog.Logger
+	// Guards is the guardrail policy (spec 012); nil uses guard.DefaultPolicy.
+	Guards     *guard.Policy
+	policyOnce sync.Once
 }
 
 type askRequest struct {
@@ -58,18 +65,36 @@ type donePayload struct {
 	InsufficientContext bool       `json:"insufficient_context,omitempty"`
 }
 
-// Ask implements the endpoint: validate → retrieve → (zero hits: fixed
-// insufficient-context answer) → prompt → stream tokens → resolve
-// citations → citation events → done → usage.
+// Ask implements the endpoint with the guard layers of spec 012:
+// probing throttle → input stages (400) → budget: circuit breakers (503)
+// and quotas (429) → retrieve → rerank → retrieval hygiene (refusal) →
+// prompt → stream through the output filter (redaction, leak detection;
+// windowed or strict) → final stages (faithfulness) → citations → done.
 func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	log := h.log()
+	pol := h.policy()
 	m, ok := tenants.FromContext(r.Context())
 	if !ok {
 		httpx.Forbidden(w)
 		return
 	}
+	userID, _ := auth.UserFrom(r.Context())
 	var req askRequest
 	if !httpx.Decode(w, r, &req) {
+		return
+	}
+	ctx := r.Context() // cancelled when the client disconnects (GEN-REQ-004)
+
+	// GRD-REQ-002: repeated guard blocks from one user escalate to 429.
+	if throttled, left := pol.Probing.Throttled(m.TenantID, userID); throttled {
+		quotas.WriteExceeded(w, &quotas.Exceeded{Code: "abuse_suspected", RetryAfter: left})
+		return
+	}
+	// GRD-AC-003: input stages before retrieval.
+	if d := guard.Evaluate(ctx, req.Question, pol.InputStages()...); d.Blocked() {
+		pol.Observe(ctx, m.TenantID, userID, d)
+		msg := "question must be 1 to " + strconv.Itoa(retrieval.MaxQuestionRunes) + " characters of plain text"
+		httpx.Error(w, http.StatusBadRequest, "invalid_question", msg)
 		return
 	}
 	question, err := retrieval.ValidateQuestion(req.Question)
@@ -82,11 +107,12 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "streaming_unsupported", "streaming unsupported")
 		return
 	}
-	ctx := r.Context() // cancelled when the client disconnects (GEN-REQ-004)
 
-	// QTA-AC-006: an open provider circuit fails fast, before any spend.
-	if a, ok := h.Generator.(interface{ Available() error }); ok {
-		if err := a.Available(); err != nil {
+	// GRD-REQ-009 / QTA-AC-006: an open provider circuit is a budget-stage
+	// Block and fails fast with 503, before any spend.
+	if a, ok := h.Generator.(guard.Availability); ok {
+		if d := guard.Evaluate(ctx, question, guard.ProviderAvailable{Providers: []guard.Availability{a}}); d.Blocked() {
+			pol.Observe(ctx, m.TenantID, userID, d)
 			providerUnavailable(w)
 			return
 		}
@@ -159,6 +185,20 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		fl.Flush()
 		return true
 	}
+	refuse := func(d guard.Decision, released bool) {
+		pol.Observe(ctx, m.TenantID, userID, d)
+		send("refusal", refusalPayload{
+			Code: "guard_blocked", Stage: d.Stage, Discard: released,
+			Message: "The answer was withheld by a safety check.",
+		})
+	}
+
+	// GRD-AC-004: tenant purity, deleted exclusion and the document cap are
+	// asserted, not assumed. A violation is a bug: refuse and alert.
+	if err := guard.AssertHygiene(m.TenantID, hits, pol.DocCap()); err != nil {
+		refuse(guard.Decision{Verdict: guard.Block, Stage: guard.StageRetrievalHygiene, Reason: "blocked", Err: err}, false)
+		return
+	}
 
 	// GEN-AC-005 / GEN-REQ-009: no sources, no model call, no fabrication.
 	if len(hits) == 0 {
@@ -169,6 +209,8 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GRD-AC-005: highest-ranked chunks within the context budget, delimited
+	// as untrusted data.
 	p := BuildPrompt(question, hits, h.MaxContextTokens)
 	p.Request.MaxOutputTokens = h.maxOutput()
 	// GEN-AC-008: prompt metadata only, never document text.
@@ -202,7 +244,8 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = stream.Close() }()
 
-	var answer strings.Builder
+	out := pol.NewOutput(leakDetector)
+	gotToken := false
 	for {
 		tok, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -216,15 +259,24 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 				log.InfoContext(ctx, "ask: client disconnected; generation cancelled", "tenant_id", m.TenantID)
 				return
 			}
+			// The unreleased tail is discarded: it never passed the final checks.
 			log.ErrorContext(ctx, "ask: generation failed mid-stream", "tenant_id", m.TenantID, "err", err)
 			send("error", errorPayload{Message: "generation failed"})
 			return
 		}
-		if answer.Len() == 0 {
+		if !gotToken {
+			gotToken = true
 			first.End()
 		}
-		answer.WriteString(tok)
-		if !send("token", tokenPayload{T: tok}) {
+		emit, d := out.Write(ctx, tok)
+		if d.Blocked() {
+			cancel() // GRD-AC-002: stop the provider; later stages never run
+			gen.Outcome = usage.OutcomeCancelled
+			gen.InputTokens, gen.OutputTokens = stream.Usage().InputTokens, stream.Usage().OutputTokens
+			refuse(d, out.Released())
+			return
+		}
+		if emit != "" && !send("token", tokenPayload{T: emit}) {
 			cancel() // write failed: the client is gone, stop spending tokens
 			gen.Outcome = usage.OutcomeCancelled
 			gen.InputTokens, gen.OutputTokens = stream.Usage().InputTokens, stream.Usage().OutputTokens
@@ -234,13 +286,64 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	u := stream.Usage()
 	gen.InputTokens, gen.OutputTokens = u.InputTokens, u.OutputTokens
 
-	citations := ResolveCitations(answer.String(), p.Sources)
+	// Final stages over the whole cleaned answer (GRD-REQ-008, optional).
+	final := pol.FinalStages(p.Sources, func(label string, err error) {
+		if err != nil {
+			log.WarnContext(ctx, "ask: faithfulness check failed", "tenant_id", m.TenantID, "err", err)
+			return
+		}
+		log.InfoContext(ctx, "ask: faithfulness", "tenant_id", m.TenantID, "label", label)
+	})
+	rest, d := out.Finish(ctx, final...)
+	if d.Blocked() {
+		refuse(d, out.Released())
+		return
+	}
+	if out.Redacted() {
+		pol.Observe(ctx, m.TenantID, userID, guard.Decision{Verdict: guard.Redact, Stage: guard.StageOutputRedact, Reason: "redacted"})
+	}
+	if rest != "" && !send("token", tokenPayload{T: rest}) {
+		return
+	}
+
+	// GRD-AC-007: only citations that resolve to this request's sources.
+	answer := out.Text()
+	citations := ResolveCitations(answer, p.Sources)
+	if len(citations) == 0 && !strings.Contains(answer, llm.InsufficientContext) {
+		// GRD-REQ-006: a soft signal, not a Block.
+		observability.M().UncitedAnswer(ctx, m.TenantID)
+		log.InfoContext(ctx, "ask: answer cites no source", "tenant_id", m.TenantID)
+	}
 	for _, c := range citations {
 		if !send("citation", c) {
 			return
 		}
 	}
 	send("done", donePayload{Citations: citations, Usage: u})
+}
+
+// refusalPayload replaces a blocked answer. Discard tells the client that
+// text it already rendered (windowed mode) must be removed.
+type refusalPayload struct {
+	Code    string `json:"code"`
+	Stage   string `json:"stage"`
+	Message string `json:"message"`
+	Discard bool   `json:"discard"`
+}
+
+// leakDetector indexes the system prompt once.
+var leakDetector = guard.NewLeakDetector(SystemPrompt)
+
+func (h *Handler) policy() *guard.Policy {
+	h.policyOnce.Do(func() {
+		if h.Guards == nil {
+			h.Guards = guard.DefaultPolicy()
+		}
+		if h.Guards.Log == nil {
+			h.Guards.Log = h.Log
+		}
+	})
+	return h.Guards
 }
 
 type tokenPayload struct {

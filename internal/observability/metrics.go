@@ -18,7 +18,7 @@ import (
 // outcomes. Document, user and chunk ids and any text are forbidden; the
 // views below drop any other key at runtime and the cardinality test fails
 // CI if code tries to use one.
-var AllowedLabels = []string{"route", "method", "status", "kind", "provider", "tenant_id", "direction", "reason", "outcome"}
+var AllowedLabels = []string{"route", "method", "status", "kind", "provider", "tenant_id", "direction", "reason", "outcome", "stage", "verdict"}
 
 // MeterOptions are the views every meter provider uses: an attribute
 // allowlist on all instruments, plus latency buckets for the HTTP histogram.
@@ -50,7 +50,8 @@ func keys(ss []string) []attribute.Key {
 // collector's suffixing: http_request_duration_seconds, jobs_queue_depth,
 // jobs_queue_age_seconds, jobs_attempts_total, jobs_failed_total,
 // provider_errors_total, tokens_total, estimated_cost_usd_total,
-// rerank_fallbacks_total, ingest_failures_total.
+// rerank_fallbacks_total, ingest_failures_total, guard_verdicts_total,
+// uncited_answers_total.
 type Metrics struct {
 	meter          metric.Meter
 	httpDuration   metric.Float64Histogram
@@ -61,6 +62,8 @@ type Metrics struct {
 	cost           metric.Float64Counter
 	rerankFallback metric.Int64Counter
 	ingestFailures metric.Int64Counter
+	guardVerdicts  metric.Int64Counter
+	uncited        metric.Int64Counter
 }
 
 // NewMetrics creates the instruments on mp.
@@ -75,6 +78,8 @@ func NewMetrics(mp metric.MeterProvider) *Metrics {
 	m.cost, _ = m.meter.Float64Counter("estimated_cost_usd", metric.WithDescription("Estimated provider cost in USD by tenant."))
 	m.rerankFallback, _ = m.meter.Int64Counter("rerank_fallbacks", metric.WithDescription("Rerank stage fallbacks to fused order, by reason."))
 	m.ingestFailures, _ = m.meter.Int64Counter("ingest_failures", metric.WithDescription("Ingestion failures by reason code (parser failure reasons)."))
+	m.guardVerdicts, _ = m.meter.Int64Counter("guard_verdicts", metric.WithDescription("Guard Block/Redact verdicts by stage (spec 012)."))
+	m.uncited, _ = m.meter.Int64Counter("uncited_answers", metric.WithDescription("Answers with sources but no citation (soft signal, spec 012)."))
 	return m
 }
 
@@ -123,6 +128,17 @@ func (m *Metrics) RerankFallback(ctx context.Context, reason string) {
 // IngestFailure counts an ingestion failure by its reason code (005).
 func (m *Metrics) IngestFailure(ctx context.Context, reason string) {
 	m.ingestFailures.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
+}
+
+// GuardVerdict counts a Block or Redact (GRD-REQ-010).
+func (m *Metrics) GuardVerdict(ctx context.Context, tenantID uuid.UUID, stage, verdict string) {
+	m.guardVerdicts.Add(ctx, 1, metric.WithAttributes(attribute.String("tenant_id", tenantID.String()),
+		attribute.String("stage", stage), attribute.String("verdict", verdict)))
+}
+
+// UncitedAnswer counts an answer that cited nothing although sources existed.
+func (m *Metrics) UncitedAnswer(ctx context.Context, tenantID uuid.UUID) {
+	m.uncited.Add(ctx, 1, metric.WithAttributes(attribute.String("tenant_id", tenantID.String())))
 }
 
 // Usage feeds tokens_total and estimated_cost_usd_total from one usage row.

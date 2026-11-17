@@ -67,6 +67,10 @@ type Hit struct {
 	// Leg ranks (1-based; 0 = not found by that leg), for evaluation (014).
 	VectorRank int `json:"vector_rank,omitempty"`
 	TextRank   int `json:"text_rank,omitempty"`
+	// TenantID and Deleted come from the database row, never from the query
+	// parameters, so the hygiene guard (012) can assert them.
+	TenantID uuid.UUID `json:"-"`
+	Deleted  bool      `json:"-"`
 	// RerankScore is set when the optional rerank stage (009) ordered the hit.
 	RerankScore float64 `json:"rerank_score,omitempty"`
 }
@@ -237,7 +241,7 @@ func hydrate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, vranks, franks 
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Hit, error) {
 		var c Hit
-		err := r.Scan(&c.ChunkID, &c.DocumentID, &c.Filename, &c.Content, &c.Page, &c.Heading)
+		err := r.Scan(&c.ChunkID, &c.DocumentID, &c.Filename, &c.Content, &c.Page, &c.Heading, &c.TenantID, &c.Deleted)
 		c.VectorRank, c.TextRank = vranks[c.ChunkID], franks[c.ChunkID]
 		return c, err
 	})
