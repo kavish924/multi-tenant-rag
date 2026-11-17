@@ -17,13 +17,13 @@
 
 - [ ] GCP region for all environments (Cloud SQL, Cloud Storage, Cloud Run, Vertex AI together)
 - [ ] Project naming prefix → `<prefix>-dev`, `<prefix>-test`, `<prefix>-prod`
-- [ ] **Vertex AI embedding model** chosen → `EMBEDDING_DIM` fixed; `vector` (≤ 2,000 dims) vs
-      `halfvec` (≤ 4,000) decided ([005 design §10](../specs/005-ingestion-pipeline/design.md))
+- [x] **Vertex AI embedding model** chosen → `EMBEDDING_DIM` fixed; `vector` (≤ 2,000 dims) vs
+      `halfvec` (≤ 4,000) decided → 768 dims, `vector(768)` (`text-embedding-005` or `gemini-embedding-001` at 768) ([005 design §10](../specs/005-ingestion-pipeline/design.md))
 - [ ] Vertex AI generation model chosen
 - [x] Go version pinned; HTTP router (`net/http` mux or `chi`); `sqlc` yes/no → Go 1.27 toolchain (`go 1.26.0` in go.mod, set by dependencies), standard `net/http` mux, no `sqlc` (hand-written pgx)
 - [x] Migration tool (`goose` or `golang-migrate`) → `goose` v3, migrations embedded and run by `cmd/migrate`
 - [x] JWT algorithm (HS256 or EdDSA) — key lives in Secret Manager → HS256, `JWT_SIGNING_KEY` ≥ 32 bytes
-- [ ] Tokenizer library for chunking ([005 design §10](../specs/005-ingestion-pipeline/design.md))
+- [x] Tokenizer library for chunking → built-in approximate tokenizer (`chunk.CountTokens`) ([005 design §10](../specs/005-ingestion-pipeline/design.md))
 - [ ] Specs **001** and **002** reviewed and marked **Approved**
 
 ## Phase 1 — GCP foundation
@@ -97,11 +97,11 @@ pulled forward here.
   - [ ] Worker loop: semaphore before claim, SIGTERM shutdown, lease takeover (Group 3)
   - [ ] Concurrency, crash, retry-ladder, **poison-pill**, RLS, load tests (Group 4)
 - [ ] **[005 Ingestion pipeline](../specs/005-ingestion-pipeline/tasks.md)**
-  - [ ] Extractors in a subprocess with Linux rlimits + hostile fixture corpus (Group 1)
-  - [ ] Chunker + ordinal-stability test (Group 2)
-  - [ ] Vertex AI embedding provider + fake; dimension validation; 429 retry (Group 3)
-  - [ ] Index tx with `FOR UPDATE`, stale-tail delete, guarded status writes (4.1–4.2)
-  - [ ] **Delete-vs-Index interleaving test** (4.2a)
+  - [x] Extractors in a subprocess with Linux rlimits + hostile fixture corpus (Group 1)
+  - [x] Chunker + ordinal-stability test (Group 2)
+  - [ ] Vertex AI embedding provider + fake; dimension validation; 429 retry (Group 3) *(all but the Vertex provider done)*
+  - [x] Index tx with `FOR UPDATE`, stale-tail delete, guarded status writes (4.1–4.2)
+  - [ ] **Delete-vs-Index interleaving test** (4.2a) *(written, not yet run)*
   - [ ] Rerun idempotency, end-to-end fixtures, load profile (Group 5)
 - [ ] **[006 Outbox messaging](../specs/006-outbox-messaging/tasks.md)**
   - [ ] `outbox` table + `Emit`; `outbox_next` / `outbox_mark_published` system functions

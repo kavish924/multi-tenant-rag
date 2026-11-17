@@ -133,7 +133,7 @@ erDiagram
 | ----------- | ---------------------------------------------------------------------------------------------------------- |
 | `documents` | Partial unique `(tenant_id, sha256) WHERE deleted_at IS NULL` — per-tenant duplicate detection that still allows re-uploading a deleted file. `status` CHECK: `uploaded`, `queued`, `processing`, `indexed`, `failed`, `deleting`, `deleted`. Soft delete sets `deleted_at` and `deleting` atomically; `deleted_at IS NOT NULL` is sticky — no pipeline write may change the status afterwards. |
 | `chunks`    | `UNIQUE (document_id, ordinal)` — **makes retries idempotent**. `tsv` is a generated column
-(`to_tsvector('english', content)`). `embedding vector(EMBEDDING_DIM)` must match the chosen
+(`to_tsvector('english', content)`). `embedding vector(768)` (`llm.EmbeddingDim`) must match the chosen
 Vertex AI embedding model's output size (HNSW: `vector` ≤ 2,000 dims, `halfvec` ≤ 4,000).
 `embed_model` recorded for future re-embedding. |
 | Indexes     | `hnsw (embedding vector_cosine_ops)` for ANN, `gin (tsv)` for full text, `(tenant_id, document_id)` for scoped access. |

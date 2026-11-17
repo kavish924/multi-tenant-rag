@@ -18,28 +18,38 @@ deletion re-check, status transitions. **Out:** queue mechanics (`004`), events 
 
 ```text
 internal/ingestion/
-├── pipeline.go     # stage orchestration, idempotent runner
-├── extract/        # pdf, docx, txt extractors + subprocess runner (limits)
-├── chunk/          # tokenizer + boundary-aware splitter (300–800 tok, 10–15% overlap)
-└── embed/          # batcher, dimension validator, rate-limit-aware client
-internal/llm        # EmbeddingProvider interface (provider implementations)
+├── pipeline.go     # ingest job handler: start → extract → chunk → embed → index
+├── extract/        # txt, docx (encoding/xml), pdf (github.com/ledongthuc/pdf) + Isolated helper runner
+├── chunk/          # tokenizer + boundary-aware splitter (300–800 tok, ~12% overlap)
+└── embed/          # batcher, dimension validator, bounded 429 retry
+internal/llm        # EmbeddingProvider interface, EmbeddingDim = 768, deterministic Fake
 ```
 
-Parser isolation: `extract` spawns a helper subprocess per file (`go run`-built binary or
-exec of the same binary with `-mode=extract`), with Linux resource limits on the child
-(`setrlimit`/`prlimit`: address space, CPU time, open files — the worker always runs in a Linux
-container on Cloud Run or in Cloud Shell), plus hard wall-clock timeout and output cap. Worker survives any
-parser death.
+Parser isolation: `extract.Isolated` re-executes the worker binary with `extract.HelperArg`
+per file. The child gets a minimal environment (no database or cloud credentials), sets its own
+Linux rlimits before parsing (`RLIMIT_AS` 1 GiB, `RLIMIT_CPU` 60 s, `RLIMIT_NOFILE` 32,
+`RLIMIT_FSIZE` 0 — the worker always runs in a Linux container on Cloud Run or in Cloud Shell),
+reads the file on stdin and writes JSON sections to stdout. The parent enforces a wall-clock
+timeout (2 min) and caps on input, stdout and stderr. Exit codes map to `ErrLimit`
+(`parser_limit_exceeded`), `ErrMalformed` (`extract_failed`) and `ErrUnsupported`; a crash or
+rlimit signal counts as `parser_limit_exceeded`. The worker survives any parser death.
+DOCX additionally caps zip entries and the inflated size of `word/document.xml` (bomb defense).
 
 ## 4. Data model changes
 
-`chunks` table (in `0001_init.sql`): per the shared schema — `UNIQUE (document_id, ordinal)`,
-`vector(EMBEDDING_DIM)`, generated `tsv`, `embed_model`, HNSW + GIN + `(tenant_id, document_id)`
+`chunks` table (`migrations/0006_chunks.sql`): per the shared schema — `UNIQUE (document_id, ordinal)`,
+`vector(768)`, a composite FK `(tenant_id, document_id) → documents (tenant_id, id)` so a chunk cannot
+point at another tenant's document, generated `tsv`, `embed_model`, HNSW + GIN + `(tenant_id, document_id)`
 indexes. `EMBEDDING_DIM` is set from the chosen **Vertex AI** embedding model's output size and
 must match the migration. pgvector HNSW supports `vector` up to 2,000 dims; above that use
 `halfvec` (≤ 4,000) or request reduced output dimensionality (`docs/gcp-environment.md §8`).
 
 ## 5. API contract (internal)
+
+Implemented as `(*ingestion.Pipeline).Handle(ctx, job, tenantTx)`, a `jobs.Handler`. Stage
+failures carry a reason code and a permanent flag: permanent ones (parser limit, malformed,
+no text, dimension mismatch, object missing) dead-letter the job at once; others retry.
+
 
 ```go
 type Stage func(ctx context.Context, d *Document) error
@@ -104,5 +114,9 @@ Chunks carry `tenant_id` from the document; all writes via `WithTenant` (RLS bac
 ## 10. Open questions
 
 - Checkpointing stage outputs vs full rerun → **default:** full rerun (idempotent upserts; simpler).
-- Tokenizer: `tiktoken`-style BPE via Go lib → **default:** any consistent tokenizer; document choice in code.
-- Embedding model → **decide before migration 0001 lands**: pick the Vertex model, record its dimension in `EMBEDDING_DIM`, and choose `vector` vs `halfvec` accordingly.
+- Tokenizer → **decided:** `chunk.CountTokens`, a dependency-free approximation (one token per
+  started 6 letters/digits, one per other symbol). Consistent, not model-exact; sizes are approximate.
+- Embedding model → **decided:** 768 dimensions (`llm.EmbeddingDim`, `vector(768)`), which fits
+  Vertex `text-embedding-005` natively or `gemini-embedding-001` with `output_dimensionality = 768`.
+  The Vertex provider lands with the GCP work; until then the worker uses `llm.Fake`.
+- Outbox events (4.3) → wired when `006` adds the `outbox` table.
