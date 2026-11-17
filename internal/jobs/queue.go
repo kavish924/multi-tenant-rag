@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 )
 
@@ -66,6 +67,7 @@ func Enqueue(ctx context.Context, tx pgx.Tx, p EnqueueParams) (id uuid.UUID, cre
 			return uuid.Nil, false, fmt.Errorf("jobs: payload: %w", err)
 		}
 	}
+	payload = withTraceParent(payload, observability.TraceParent(ctx))
 	maxAttempts := p.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxAttempts
@@ -104,8 +106,25 @@ func Enqueue(ctx context.Context, tx pgx.Tx, p EnqueueParams) (id uuid.UUID, cre
 // Heartbeat, Complete and Fail run inside WithTenant(job.TenantID) and are
 // guarded by locked_by, so a worker whose lease was taken over cannot write.
 type Queue struct {
-	store *storage.Store
-	lease time.Duration
+	store     *storage.Store
+	lease     time.Duration
+	tenantCap int
+}
+
+// DefaultTenantConcurrency caps running jobs per tenant when the tenant has
+// no override (QTA-REQ-001: concurrent_worker_jobs_per_tenant = 3).
+const DefaultTenantConcurrency = 3
+
+// SetTenantCap sets the default per-tenant running-job cap claim_job
+// enforces (tenant_quotas.concurrent_jobs overrides it per tenant).
+func (q *Queue) SetTenantCap(n int) { q.tenantCap = n }
+
+// TenantCap is the default per-tenant running-job cap.
+func (q *Queue) TenantCap() int {
+	if q.tenantCap <= 0 {
+		return DefaultTenantConcurrency
+	}
+	return q.tenantCap
 }
 
 // NewQueue builds a queue; lease <= 0 uses DefaultLease.
@@ -127,8 +146,8 @@ func (q *Queue) Claim(ctx context.Context, workerID string, kinds []string) (*Jo
 	}
 	var j Job
 	err := q.store.Pool().QueryRow(ctx,
-		`SELECT id, tenant_id, kind, payload, attempts, max_attempts FROM claim_job($1, $2, $3)`,
-		workerID, q.lease, kinds).
+		`SELECT id, tenant_id, kind, payload, attempts, max_attempts FROM claim_job($1, $2, $3, $4)`,
+		workerID, q.lease, kinds, q.TenantCap()).
 		Scan(&j.ID, &j.TenantID, &j.Kind, &j.Payload, &j.Attempts, &j.MaxAttempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -224,4 +243,48 @@ func Permanent(err error) error {
 func IsPermanent(err error) bool {
 	var p permanentError
 	return errors.As(err, &p)
+}
+
+// traceParentKey carries the enqueuing span's W3C context in the payload
+// (OBS-REQ-003). Handlers ignore it; old payloads without it still work.
+const traceParentKey = "traceparent"
+
+// withTraceParent adds traceparent to a JSON object payload.
+func withTraceParent(payload []byte, tp string) []byte {
+	if tp == "" {
+		return payload
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &m); err != nil || m == nil {
+		return payload // not an object: leave it alone
+	}
+	v, _ := json.Marshal(tp)
+	m[traceParentKey] = v
+	out, err := json.Marshal(m)
+	if err != nil {
+		return payload
+	}
+	return out
+}
+
+func traceParentOf(payload []byte) string {
+	var m struct {
+		TP string `json:"traceparent"`
+	}
+	_ = json.Unmarshal(payload, &m)
+	return m.TP
+}
+
+// Stats reports queue depth and oldest-runnable age per kind across all
+// tenants through the job_queue_stats system function (OBS-REQ-004).
+func (q *Queue) Stats(ctx context.Context) ([]observability.QueueStat, error) {
+	rows, err := q.store.Pool().Query(ctx, `SELECT kind, depth, oldest_age_seconds FROM job_queue_stats()`)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: stats: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (observability.QueueStat, error) {
+		var s observability.QueueStat
+		err := r.Scan(&s.Kind, &s.Depth, &s.OldestAgeS)
+		return s, err
+	})
 }

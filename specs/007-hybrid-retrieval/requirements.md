@@ -1,7 +1,7 @@
 # 007 — Hybrid Retrieval (RRF): Requirements
 
 - **Spec ID:** 007 `RET`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 3 — RAG end to end
 - **Depends on:** `specs/005-ingestion-pipeline`
 - **Shared context:** `docs/system-design.md §5` (hybrid retrieval)

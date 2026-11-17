@@ -68,3 +68,26 @@ Provider requests carry only this tenant's hit texts for this request (RER-REQ-0
 - Cache rerank scores keyed by (chunk_id, question-hash) → **default:** no cache initially
   (correctness first; cache risks cross-request staleness — and any cache key MUST include
   tenant, per red-team "cache leakage" category).
+
+## 11. As built
+
+- `reranking.Stage{Enabled, Reranker, Keep, Timeout, Candidates, OnFallback}` wraps any
+  `Reranker`. A nil or disabled stage never calls a provider; the ask handler then asks retrieval
+  for 8 hits directly. Enabled, it asks retrieval for 50, reranks under an 800 ms timeout and keeps 8.
+- The stage **re-maps the reranker's output to the original candidates by chunk id** and
+  rejects unknown or duplicate ids, so an implementation cannot alter content, document ids or
+  citation targets (RER-REQ-005). Rank is renumbered; `Hit.RerankScore` carries the score.
+- Fallback reasons: `timeout`, `error`, `invalid` (malformed or non-candidate output), logged
+  at warn and passed to `OnFallback`, the `rerank_fallback` metric hook for `010`.
+- `reranking.LLM`: listwise prompt (passages escaped and capped at 600 bytes each), output must
+  match `3, 1, 7` exactly (in range, no duplicates), otherwise `ErrMalformed`.
+- `reranking.CrossEncoder`: Vertex AI Ranking API shape (`records [{id, content}]` → `records
+  [{id, score}]`, ids are candidate positions, never database ids). `Authorize` hook for the
+  OAuth token (GCP work).
+- Usage: every call writes `usage_events(kind='rerank')` with its outcome. Both implementations
+  record **approximate input tokens** (the cross-encoder: query + records) rather than item
+  counts, so quotas (`011`) sum one unit; the model column tells providers apart.
+- Config (`cmd/api`): `RERANK_ENABLED` (default false), `RERANK_PROVIDER` (`llm` |
+  `cross_encoder`), `RERANK_KEEP` (8), `RERANK_TIMEOUT` (800ms), `RERANK_ENDPOINT`,
+  `RERANK_MODEL`. With the dev fake generator the LLM reranker's output is malformed, so it
+  always falls back, which exercises the fail-open path.

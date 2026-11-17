@@ -61,3 +61,15 @@ variable "placeholder_image" {
   description = "Image used only on first create; Cloud Build deploys the real one"
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
+
+variable "otel_collector_image" {
+  type        = string
+  description = "OpenTelemetry collector sidecar image (contrib build: googlecloud + googlemanagedprometheus exporters)"
+  default     = "otel/opentelemetry-collector-contrib:0.121.0"
+}
+
+variable "trace_sample_ratio" {
+  type        = number
+  description = "Head-sampling ratio for new traces: 1.0 in dev, 0.1 in prod (spec 010)"
+  default     = 1.0
+}

@@ -30,7 +30,7 @@ func (p LogPublisher) Publish(ctx context.Context, ev Event) error {
 		slog.String("topic", ev.Topic),
 		slog.String("tenant_id", ev.TenantID.String()),
 		slog.Time("occurred_at", ev.OccurredAt),
-		slog.String("data", string(ev.Data)), // ids only (OBX-REQ-005)
+		slog.String("event_data", string(ev.Data)), // ids only (OBX-REQ-005)
 	)
 	return nil
 }

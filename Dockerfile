@@ -1,5 +1,5 @@
 # One Dockerfile for every binary:  docker build --build-arg BIN=api -t api .
-# BIN is one of: api, worker, outbox-relay, migrate.
+# BIN is one of: api, worker, outbox-relay, migrate, quotactl.
 
 ARG GO_VERSION=1.27
 

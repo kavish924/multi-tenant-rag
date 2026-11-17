@@ -70,7 +70,7 @@ func upload(t *testing.T, tenantID uuid.UUID, ctype string, body []byte) (uuid.U
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, err := jobs.NewQueue(env.Store, 0).Claim(ctx, "test", []string{ingestion.JobKind})
+	j, err := func() *jobs.Queue { q := jobs.NewQueue(env.Store, 0); q.SetTenantCap(1 << 20); return q }().Claim(ctx, "test", []string{ingestion.JobKind})
 	if err != nil || j == nil {
 		t.Fatalf("claim: %v %v", j, err)
 	}

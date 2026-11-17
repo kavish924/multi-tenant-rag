@@ -1,7 +1,7 @@
 # 008 — Generation, Streaming & Citations: Requirements
 
 - **Spec ID:** 008 `GEN`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 3 — RAG end to end
 - **Depends on:** `specs/007-hybrid-retrieval`
 - **Shared context:** `docs/system-design.md §6` (generation, streaming, citations)

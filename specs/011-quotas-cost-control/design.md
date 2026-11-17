@@ -74,3 +74,42 @@ spend (risk table: "Excessive LLM spending").
 ## 10. Open questions
 
 - Sliding windows vs fixed → **default:** fixed windows (simple, race-safe); revisit with data.
+
+## 11. As built
+
+- `migrations/0010_quotas.sql`: `tenant_quotas` (overrides; NULL = default; `app` SELECT only),
+  `tenant_usage_counters` (UTC day windows for `uploads`/`questions`, UTC month windows for
+  `embed_tokens`/`generate_tokens`), `ask_slots` (one row per live stream, expiring after 16 min),
+  all under forced RLS. `claim_job` gains `p_tenant_cap` (system function list updated).
+- `quotas.Limiter`: effective limits = defaults ⊕ overrides, cached 5 s (an override applies
+  within 5 s, QTA-AC-007). **Counts** (`uploads`, `questions`) use a conditional UPSERT
+  (`... DO UPDATE ... WHERE used + n <= limit`), which serializes on the counter row: zero
+  overdraft (QTA-AC-005). **Token budgets** are checked against the projection before the call
+  and charged with actuals by `usage.Recorder` in the same transaction as the `usage_events` row,
+  so the counters always equal the aggregates (QTA-AC-008); concurrent calls may overshoot by at
+  most `concurrent_asks × projection` (~5 × 7k = 35k of 20M = 0.2%, inside the 1% tolerance).
+  `rerank` usage draws from `generate_tokens`; ingestion now records `embed` usage (chunk tokens).
+- **Concurrency:** `AcquireAskSlot` takes a per-tenant transaction advisory lock, drops expired
+  slots, counts and inserts — exact across API instances. The worker gate is in `claim_job`:
+  a tenant at its running-job cap is skipped; two claimers racing can exceed it by at most
+  (workers − 1) for one claim.
+- **Ask gate order** (before retrieval): generator circuit open → 503; ask slot → embed and
+  generate token checks → reserve one question. A failure before the SSE stream opens refunds
+  the question; the slot is released when the request ends. Projection = question + 6,000
+  context + 1,024 output tokens (+ the listwise rerank prompt when reranking is on).
+- **Upload gate:** one upload is reserved before the body is read and refunded unless a new
+  document was created (validation errors and duplicates cost nothing).
+- **Breakers** (`internal/breaker`): `Threshold` consecutive failures (errors and 429s; caller
+  cancellations ignored) open the circuit for `OpenFor`; then one probe at a time; a failed
+  probe re-opens. `breaker.Embedder` / `breaker.Generator` wrap providers (one breaker per
+  provider per process). Ask: open → 503 `provider_unavailable` with `Retry-After: 30`;
+  ingestion: `ErrOpen` is a retryable embed failure, so the retry ladder is unchanged.
+- **API:** 429 envelope per §5 with `Retry-After` (to the window end; 5 s for concurrency).
+  `GET /tenants/{tenant}/usage` (admin+): per-dimension `{limit, used, window_start,
+  window_end}`, live asks, job cap, and `estimated_cost_usd` for the month from `usage_events`
+  × `observability.Prices`.
+- **Operator path:** `cmd/quotactl show|set|reset -tenant <id>`, run with the migrator's
+  credentials (the app role cannot write overrides). `set` replaces the whole override row.
+- Config: `QUOTA_*` defaults, `BREAKER_THRESHOLD` (5), `BREAKER_OPEN_FOR` (30s).
+- Not yet: an embed-budget gate inside ingestion (ingestion usage is counted but not blocked),
+  and cleanup of old counter windows.

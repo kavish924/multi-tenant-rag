@@ -22,12 +22,15 @@ only from provided context, and citations resolve only to this request's retriev
 
 ## 4. Data model changes
 
-None (reads `usage_events`). Optional `prompt_snapshot` table (eval/debug) — **default:** log
+`usage_events` (`migrations/0008_usage_events.sql`): `tenant_id, kind (embed|generate|rerank),
+model, input_tokens, output_tokens, outcome (ok|error|cancelled), request_id, created_at`, RLS;
+`app` may `SELECT`/`INSERT` only. Optional `prompt_snapshot` table (eval/debug) — **default:** log
 structured prompt metadata only, no doc text (cardinality + logging rules in `010`).
 
 ## 5. API contract
 
-`POST /tenants/{id}/ask` → SSE. Events:
+`POST /tenants/{tenant}/ask` (and `POST /ask`, tenant from `X-Tenant-ID` or the sole
+membership, like `/documents`) with `{"question": "..."}` → SSE. Events:
 
 ```text
 event: token     data: {"t":"..."}
@@ -74,3 +77,25 @@ layers in `012` wrap this endpoint.
 
 - Stream partial citations as they appear vs at end → **default:** resolve at end (model may
   cite any chunk until done); revisit for UX.
+
+## 11. As built
+
+- `internal/llm`: `Generator.Stream(ctx, GenerateRequest) (Stream, error)`; `Stream` is
+  `Recv() (string, error)` (io.EOF at the end, ctx error on cancel), `Usage()`, `Close()`.
+  `FakeGenerator` answers extractively from source 1 with `[1]` (deterministic dev/test
+  provider; options for scripted answers, per-token delay and injected mid-stream failure).
+  The Vertex AI Gemini provider lands with the GCP work.
+- `internal/conversations`: `BuildPrompt` (sources `<source n="i" document=… page=… heading=…>`
+  inside `<sources>`, all document text and the question HTML-escaped so nothing can close a
+  delimiter; context budget 6,000 approx. tokens, first hit always kept), `ResolveCitations`
+  (`\[(\d{1,4})\]`, range check, dedupe, first-appearance order), `Handler.Ask`.
+- Top 8 hits go into the prompt (RET-REQ-004). Zero hits ⇒ a fixed insufficient-context answer
+  **without calling the model** (cheaper and cannot fabricate), `done.insufficient_context = true`.
+- `done` carries `citations`, `usage {input, output}` and `insufficient_context`. Citation
+  events carry `n, chunk_id, document_id, filename, page, heading`.
+- Usage: one `embed` row per successful retrieval (question tokens, approximate) and one
+  `generate` row on every path once the model was called, with `outcome` ok/error/cancelled.
+- A failed SSE write (client gone) cancels the provider context at once; otherwise the request
+  context does (GEN-AC-004). Prompt metadata (source count, chunk ids, context tokens, model)
+  is logged; document text never is (GEN-AC-008).
+- `statusRecorder` (request logger) now implements `http.Flusher` and `Unwrap`.

@@ -33,12 +33,12 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | [004](./004-job-queue/) | Job queue (PostgreSQL) | 2 — Async ingestion | In progress |
 | [005](./005-ingestion-pipeline/) | Ingestion pipeline | 2 — Async ingestion | In progress |
 | [006](./006-outbox-messaging/) | Outbox messaging | 2 — Async ingestion | In progress |
-| [007](./007-hybrid-retrieval/) | Hybrid retrieval (RRF) | 3 — RAG end to end | Draft |
-| [008](./008-generation-citations/) | Generation, streaming & citations | 3 — RAG end to end | Draft |
-| [009](./009-reranking/) | Reranking (optional stage) | 3 — RAG end to end | Draft |
-| [010](./010-observability/) | Observability | 4 — Observable production | Draft |
-| [011](./011-quotas-cost-control/) | Quotas & cost control | 4 — Observable production | Draft |
-| [012](./012-guardrails/) | Guardrails (fail-closed pipeline) | 5 — Release-quality capstone | Draft |
+| [007](./007-hybrid-retrieval/) | Hybrid retrieval (RRF) | 3 — RAG end to end | In progress |
+| [008](./008-generation-citations/) | Generation, streaming & citations | 3 — RAG end to end | In progress |
+| [009](./009-reranking/) | Reranking (optional stage) | 3 — RAG end to end | In progress |
+| [010](./010-observability/) | Observability | 4 — Observable production | In progress |
+| [011](./011-quotas-cost-control/) | Quotas & cost control | 4 — Observable production | In progress |
+| [012](./012-guardrails/) | Guardrails (fail-closed pipeline) | 5 — Release-quality capstone | In progress |
 | [013](./013-deletion-cleanup/) | Deletion & cleanup | 5 — Release-quality capstone | Draft |
 | [014](./014-evaluation/) | Evaluation harness | 5 — Release-quality capstone | Draft |
 | [015](./015-isolation-redteam/) | Isolation tests & red teaming | 5 — Release-quality capstone | Draft |

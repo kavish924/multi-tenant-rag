@@ -179,6 +179,41 @@ resource "google_secret_manager_secret_iam_member" "jwt_api" {
 
 # ---------------------------------------------------------------- cloud run
 
+# --- Observability (spec 010) ---------------------------------------------
+
+resource "google_project_iam_member" "telemetry" {
+  for_each = {
+    for pair in setproduct(["api", "worker", "relay"], ["roles/cloudtrace.agent", "roles/monitoring.metricWriter"]) :
+    "${pair[0]}-${pair[1]}" => { sa = pair[0], role = pair[1] }
+  }
+  project = var.project_id
+  role    = each.value.role
+  member  = "serviceAccount:${google_service_account.runtime[each.value.sa].email}"
+}
+
+resource "google_secret_manager_secret" "otel_config" {
+  secret_id = "otel-collector-config"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "otel_config" {
+  secret      = google_secret_manager_secret.otel_config.id
+  secret_data = file("${path.module}/../../../otel-collector/cloudrun.yaml")
+}
+
+resource "google_secret_manager_secret_iam_member" "otel_config" {
+  for_each  = toset(["api", "worker", "relay"])
+  secret_id = google_secret_manager_secret.otel_config.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime[each.value].email}"
+}
+
+resource "google_monitoring_dashboard" "platform" {
+  dashboard_json = file("${path.module}/../../dashboards/platform.json")
+}
+
 resource "google_cloud_run_v2_service" "api" {
   name                = "api"
   location            = var.region
@@ -204,6 +239,7 @@ resource "google_cloud_run_v2_service" "api" {
     }
 
     containers {
+      name  = "api"
       image = var.placeholder_image
       ports {
         container_port = 8080
@@ -230,6 +266,53 @@ resource "google_cloud_run_v2_service" "api" {
             secret  = google_secret_manager_secret.jwt.secret_id
             version = "latest"
           }
+        }
+      }
+      env {
+        name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
+        value = "localhost:4317"
+      }
+      env {
+        name  = "OTEL_TRACES_SAMPLER_ARG"
+        value = tostring(var.trace_sample_ratio)
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      depends_on = ["otel-collector"]
+    }
+
+    # OpenTelemetry collector sidecar (spec 010): OTLP on localhost:4317 →
+    # Cloud Trace + Managed Service for Prometheus.
+    containers {
+      name  = "otel-collector"
+      image = var.otel_collector_image
+      args  = ["--config=/etc/otelcol/config.yaml"]
+      resources {
+        limits = { cpu = "0.5", memory = "256Mi" }
+      }
+      volume_mounts {
+        name       = "otel-config"
+        mount_path = "/etc/otelcol"
+      }
+      startup_probe {
+        http_get {
+          path = "/"
+          port = 13133
+        }
+        period_seconds    = 2
+        failure_threshold = 15
+      }
+    }
+
+    volumes {
+      name = "otel-config"
+      secret {
+        secret = google_secret_manager_secret.otel_config.secret_id
+        items {
+          version = "latest"
+          path    = "config.yaml"
         }
       }
     }

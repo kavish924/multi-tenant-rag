@@ -12,18 +12,20 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/chunk"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/embed"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/extract"
 	"github.com/kavish924/multi-tenant-rag/internal/jobs"
 	"github.com/kavish924/multi-tenant-rag/internal/messaging"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
+	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
+	"github.com/kavish924/multi-tenant-rag/internal/usage"
 )
 
 // JobKind is the queue kind this pipeline handles.
@@ -54,6 +56,9 @@ type Pipeline struct {
 	Embedder  *embed.Batcher
 	Chunking  chunk.Options // zero = chunk.Defaults
 	Log       *slog.Logger
+	// Usage, when set, records the embedding tokens each ingest spends, so
+	// embed_tokens/month covers ingestion as well as questions (011).
+	Usage *usage.Recorder
 
 	// BeforeIndex, when set, runs just before the Index transaction takes
 	// the document row lock. Tests use it to schedule interleavings
@@ -94,7 +99,7 @@ func (p *Pipeline) Handle(ctx context.Context, job jobs.Job, tx jobs.TenantTx) e
 		return err
 	}
 	if !ok {
-		log.Info("document deleted or gone; ingest cancelled")
+		log.InfoContext(ctx, "document deleted or gone; ingest cancelled")
 		return nil // completes as cancelled (ING-REQ-010)
 	}
 
@@ -108,17 +113,18 @@ func (p *Pipeline) Handle(ctx context.Context, job jobs.Job, tx jobs.TenantTx) e
 		// failure or the job's last attempt (ING-AC-008).
 		final := se.permanent || job.Attempts >= job.MaxAttempts
 		p.markFailed(ctx, tx, job.TenantID, docID, se, final)
-		log.Warn("ingest failed", "reason", se.reason, "permanent", se.permanent, "err", se.err)
+		observability.M().IngestFailure(ctx, se.reason)
+		log.WarnContext(ctx, "ingest failed", "reason", se.reason, "permanent", se.permanent, "err", se.err)
 		if se.permanent {
 			return jobs.Permanent(err)
 		}
 		return err
 	}
 	if cancelled {
-		log.Info("document deleted before index; no chunks written")
+		log.InfoContext(ctx, "document deleted before index; no chunks written")
 		return nil
 	}
-	log.Info("document indexed", "chunks", n)
+	log.InfoContext(ctx, "document indexed", "chunks", n)
 	return nil
 }
 
@@ -151,16 +157,12 @@ func (p *Pipeline) start(ctx context.Context, tx jobs.TenantTx, id uuid.UUID) (d
 
 func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uuid.UUID, d docInfo) (int, bool, error) {
 	// Extract (isolated helper process).
-	body, err := p.Objects.Get(ctx, d.objectKey)
-	if errors.Is(err, objectstore.ErrNotFound) {
-		return 0, false, fail(ReasonObjectMissing, true, err)
-	}
-	if err != nil {
-		return 0, false, fail(ReasonStorage, false, err)
-	}
-	secs, err := p.Extractor.Extract(ctx, d.contentType, body)
-	_ = body.Close()
+	secs, err := p.extract(ctx, d)
 	switch {
+	case errors.Is(err, objectstore.ErrNotFound):
+		return 0, false, fail(ReasonObjectMissing, true, err)
+	case errors.Is(err, errStorage):
+		return 0, false, fail(ReasonStorage, false, err)
 	case errors.Is(err, extract.ErrLimit):
 		return 0, false, fail(ReasonParserLimit, true, err)
 	case errors.Is(err, extract.ErrMalformed):
@@ -176,7 +178,10 @@ func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uu
 	if opts.MaxTokens == 0 {
 		opts = chunk.Defaults
 	}
+	_, span := observability.Start(ctx, "chunk")
 	chunks := chunk.Split(secs, opts)
+	span.SetAttributes(attribute.Int("chunks", len(chunks)))
+	span.End()
 	if len(chunks) == 0 {
 		return 0, false, fail(ReasonNoText, true, errors.New("no text could be extracted"))
 	}
@@ -187,6 +192,17 @@ func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uu
 		texts[i] = c.Content
 	}
 	vecs, err := p.Embedder.Embed(ctx, texts)
+	if err == nil && p.Usage != nil {
+		tokens := 0
+		for _, c := range chunks {
+			tokens += c.TokenCount
+		}
+		if uerr := p.Usage.Record(ctx, usage.Event{
+			TenantID: tenantID, Kind: usage.KindEmbed, Model: p.Embedder.Provider.Model(), InputTokens: tokens,
+		}); uerr != nil {
+			p.log().ErrorContext(ctx, "record embed usage", "document_id", docID, "err", uerr)
+		}
+	}
 	switch {
 	case errors.Is(err, embed.ErrDimensionMismatch):
 		return 0, false, fail(ReasonDimensionMismatch, true, err)
@@ -198,11 +214,30 @@ func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uu
 	if p.BeforeIndex != nil {
 		p.BeforeIndex(ctx, docID)
 	}
-	cancelled, err := p.index(ctx, tx, tenantID, docID, chunks, vecs)
+	ictx, span := observability.Start(ctx, "index write", attribute.Int("chunks", len(chunks)))
+	cancelled, err := p.index(ictx, tx, tenantID, docID, chunks, vecs)
+	observability.End(span, err)
 	if err != nil {
 		return 0, false, fail(ReasonInternal, false, err)
 	}
 	return len(chunks), cancelled, nil
+}
+
+var errStorage = errors.New("object storage error")
+
+// extract reads the object and parses it in the helper process.
+func (p *Pipeline) extract(ctx context.Context, d docInfo) (secs []extract.Section, err error) {
+	ctx, span := observability.Start(ctx, "extract", attribute.String("content_type", d.contentType))
+	defer func() { observability.End(span, err) }()
+	body, err := p.Objects.Get(ctx, d.objectKey)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errStorage, err)
+	}
+	defer func() { _ = body.Close() }()
+	return p.Extractor.Extract(ctx, d.contentType, body)
 }
 
 // index writes chunks and marks the document indexed in one transaction
@@ -240,7 +275,7 @@ func (p *Pipeline) index(ctx context.Context, tx jobs.TenantTx, tenantID, docID 
 					  embed_model = EXCLUDED.embed_model, embedding = EXCLUDED.embedding,
 					  updated_at = now()`,
 					tenantID, docID, c.Ordinal, c.Content, c.TokenCount,
-					nullInt(c.Page), nullString(c.Heading), model, VectorLiteral(vecs[i]))
+					nullInt(c.Page), nullString(c.Heading), model, storage.VectorLiteral(vecs[i]))
 			}
 			if err := t.SendBatch(ctx, b).Close(); err != nil {
 				return fmt.Errorf("upsert chunks: %w", err)
@@ -292,21 +327,6 @@ func (p *Pipeline) log() *slog.Logger {
 		return p.Log
 	}
 	return slog.Default()
-}
-
-// VectorLiteral formats a vector in pgvector's text form, "[x,y,...]".
-func VectorLiteral(v []float32) string {
-	var b strings.Builder
-	b.Grow(len(v) * 10)
-	b.WriteByte('[')
-	for i, x := range v {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(strconv.FormatFloat(float64(x), 'g', -1, 32))
-	}
-	b.WriteByte(']')
-	return b.String()
 }
 
 func nullInt(n int) any {

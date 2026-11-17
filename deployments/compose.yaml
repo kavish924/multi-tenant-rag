@@ -1,5 +1,6 @@
 # Dev test stack for Cloud Shell or the devbox VM (docs/tech-stack.md). Not used in Cloud Run.
-# fake-gcs-server and the OTel collector join when specs 003 and 010 land.
+# fake-gcs-server joins with the GCS object store. Point the binaries at the
+# collector with OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 (spec 010).
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -14,3 +15,10 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:${OTELCOL_VERSION:-0.121.0}
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector/local.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:4317:4317"

@@ -15,6 +15,9 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
+	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
 
@@ -23,7 +26,10 @@ type Deps struct {
 	Users     *auth.Service
 	Tokens    TokenVerifier
 	Tenants   *tenants.Service
-	Documents *documents.Service // optional: document routes are mounted only when set
+	Documents *documents.Service  // optional: document routes are mounted only when set
+	Retriever retrieval.Retriever // optional: POST /search is mounted only when set
+	Ask       http.Handler        // optional: POST /ask and POST /tenants/{tenant}/ask (spec 008)
+	Quotas    *quotas.Limiter     // optional: upload gate and GET /tenants/{tenant}/usage (spec 011)
 	Ready     func(context.Context) error
 	Log       *slog.Logger
 }
@@ -67,8 +73,21 @@ func New(d Deps) http.Handler {
 		mux.Handle("DELETE /documents/{id}", tenantRoute(tenants.RoleMember, s.deleteDocument))
 		mux.Handle("GET /documents/{id}/content", tenantRoute(tenants.RoleMember, s.documentContent))
 	}
+	if d.Retriever != nil {
+		mux.Handle("POST /search", tenantRoute(tenants.RoleMember, s.search))
+	}
+	if d.Quotas != nil {
+		mux.Handle("GET /tenants/{tenant}/usage", tenantRoute(tenants.RoleAdmin, s.usage))
+	}
+	if d.Ask != nil {
+		ask := d.Ask.ServeHTTP
+		mux.Handle("POST /ask", tenantRoute(tenants.RoleMember, ask))
+		mux.Handle("POST /tenants/{tenant}/ask", tenantRoute(tenants.RoleMember, ask))
+	}
 
-	return logRequests(d.Log, mux)
+	// Outermost: request id + server span + latency metric (spec 010), so
+	// the request log line carries the trace and request ids.
+	return observability.Middleware(logRequests(d.Log, mux))
 }
 
 func (s *server) ready(w http.ResponseWriter, r *http.Request) {

@@ -20,16 +20,22 @@ import (
 
 	"github.com/kavish924/multi-tenant-rag/internal/api"
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
+	"github.com/kavish924/multi-tenant-rag/internal/conversations"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
+	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
+	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 	"github.com/kavish924/multi-tenant-rag/internal/testutil/pgtest"
+	"github.com/kavish924/multi-tenant-rag/internal/usage"
 )
 
 var (
 	env     *pgtest.Env
 	srv     *httptest.Server
 	objects *objectstore.FS
+	limiter *quotas.Limiter
 )
 
 // maxUpload is small so the size-limit test stays fast.
@@ -57,13 +63,25 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	limiter = quotas.New(env.Store, quotas.Defaults)
+	limiter.CacheTTL = -1 // tests change overrides between requests
 	srv = httptest.NewServer(api.New(api.Deps{
 		Users:     users,
 		Tokens:    tokens,
 		Tenants:   tenants.NewService(env.Store),
 		Documents: documents.NewService(env.Store, objects, maxUpload),
-		Ready:     env.Store.Ping,
-		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Retriever: retrieval.NewHybrid(env.Store, llm.Fake{}, retrieval.Options{}, nil),
+		Quotas:    limiter,
+		Ask: http.HandlerFunc((&conversations.Handler{
+			Retriever:  retrieval.NewHybrid(env.Store, llm.Fake{}, retrieval.Options{}, nil),
+			Generator:  llm.FakeGenerator{},
+			Usage:      usage.NewRecorder(env.Store),
+			Quotas:     limiter,
+			EmbedModel: llm.Fake{}.Model(),
+			Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}).Ask),
+		Ready: env.Store.Ping,
+		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))
 
 	code := m.Run()

@@ -87,7 +87,7 @@ func TestEnqueueIsTransactional(t *testing.T) {
 	env.Truncate(t)
 	ctx := context.Background()
 	tid := tenant(t)
-	q := jobs.NewQueue(env.Store, 0)
+	q := newQueue(0)
 
 	rollback := errors.New("rollback")
 	err := env.Store.WithTenant(ctx, tid, func(tx pgx.Tx) error {
@@ -118,7 +118,7 @@ func TestConcurrentClaimsAreDistinct(t *testing.T) {
 	env.Truncate(t)
 	ctx := context.Background()
 	tid := tenant(t)
-	q := jobs.NewQueue(env.Store, 0)
+	q := newQueue(0)
 	const n = 40
 	for i := 0; i < n; i++ {
 		enqueue(t, tid, jobs.EnqueueParams{})
@@ -163,7 +163,7 @@ func TestLeaseExpiryAndHeartbeat(t *testing.T) {
 	env.Truncate(t)
 	ctx := context.Background()
 	tid := tenant(t)
-	q := jobs.NewQueue(env.Store, time.Minute)
+	q := newQueue(time.Minute)
 	id := enqueue(t, tid, jobs.EnqueueParams{})
 
 	j1, _ := q.Claim(ctx, "w1", kinds)
@@ -198,7 +198,7 @@ func TestRetryLadderThenDead(t *testing.T) {
 	env.Truncate(t)
 	ctx := context.Background()
 	tid := tenant(t)
-	q := jobs.NewQueue(env.Store, 0)
+	q := newQueue(0)
 	id := enqueue(t, tid, jobs.EnqueueParams{MaxAttempts: 3})
 
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -240,7 +240,7 @@ func TestPermanentFailureIsDeadImmediately(t *testing.T) {
 	env.Truncate(t)
 	ctx := context.Background()
 	tid := tenant(t)
-	q := jobs.NewQueue(env.Store, 0)
+	q := newQueue(0)
 	id := enqueue(t, tid, jobs.EnqueueParams{})
 	j, _ := q.Claim(ctx, "w", kinds)
 	dead, err := q.Fail(ctx, *j, "w", jobs.Permanent(errors.New("not a pdf")))
@@ -279,7 +279,7 @@ func TestPoisonPillIsReaped(t *testing.T) {
 	env.Truncate(t)
 	ctx := context.Background()
 	tid := tenant(t)
-	q := jobs.NewQueue(env.Store, 0)
+	q := newQueue(0)
 	id := enqueue(t, tid, jobs.EnqueueParams{MaxAttempts: 2})
 
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -314,7 +314,7 @@ func TestClaimCrossesTenantsOnlyThroughSystemFunction(t *testing.T) {
 	if visible != 0 {
 		t.Errorf("app sees %d jobs without tenant context", visible)
 	}
-	q := jobs.NewQueue(env.Store, 0)
+	q := newQueue(0)
 	got := map[uuid.UUID]bool{}
 	for i := 0; i < 2; i++ {
 		j, err := q.Claim(ctx, "w", kinds)
@@ -333,11 +333,60 @@ func TestClaimFiltersByKind(t *testing.T) {
 	ctx := context.Background()
 	tid := tenant(t)
 	enqueue(t, tid, jobs.EnqueueParams{Kind: "cleanup"})
-	q := jobs.NewQueue(env.Store, 0)
+	q := newQueue(0)
 	if j, _ := q.Claim(ctx, "w", []string{"ingest"}); j != nil {
 		t.Fatal("claimed a kind the worker does not handle")
 	}
 	if j, _ := q.Claim(ctx, "w", []string{"cleanup"}); j == nil {
 		t.Fatal("matching kind not claimed")
+	}
+}
+
+// newQueue lifts the per-tenant cap so tests that hold many claims of one
+// tenant exercise the queue, not the quota (the cap has its own test).
+func newQueue(lease time.Duration) *jobs.Queue {
+	q := jobs.NewQueue(env.Store, lease)
+	q.SetTenantCap(1 << 20)
+	return q
+}
+
+// QTA-REQ-002: claim_job stops at the tenant's running-job cap, the
+// override wins over the default, and other tenants are unaffected.
+func TestTenantJobCap(t *testing.T) {
+	env.Truncate(t)
+	ctx := context.Background()
+	a, b := tenant(t), tenant(t)
+	for i := 0; i < 5; i++ {
+		enqueue(t, a, jobs.EnqueueParams{})
+	}
+	enqueue(t, b, jobs.EnqueueParams{})
+	q := jobs.NewQueue(env.Store, 0)
+	q.SetTenantCap(2)
+	claimed := map[uuid.UUID]int{}
+	for {
+		j, err := q.Claim(ctx, "w", kinds)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j == nil {
+			break
+		}
+		claimed[j.TenantID]++
+	}
+	if claimed[a] != 2 || claimed[b] != 1 {
+		t.Fatalf("claimed %v, want a=2 b=1", claimed)
+	}
+	if _, err := env.Admin.Exec(ctx, `INSERT INTO tenant_quotas (tenant_id, concurrent_jobs) VALUES ($1, 4)`, a); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		j, _ := q.Claim(ctx, "w", kinds)
+		if j == nil {
+			break
+		}
+		claimed[j.TenantID]++
+	}
+	if claimed[a] != 4 {
+		t.Errorf("after override a=%d, want 4", claimed[a])
 	}
 }

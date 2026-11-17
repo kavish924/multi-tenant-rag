@@ -10,6 +10,7 @@ import (
 
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
@@ -23,21 +24,45 @@ const multipartOverhead = 1 << 20
 // fields are ignored (DOC-AC-009).
 func (s *server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 	m, _ := tenants.FromContext(r.Context())
+	// QTA-AC-002: uploads/day is reserved before anything is read or stored,
+	// and refunded unless a new document was created.
+	if s.Quotas != nil {
+		res, err := s.Quotas.Reserve(r.Context(), m.TenantID, quotas.DimUploads, 1)
+		var ex *quotas.Exceeded
+		if errors.As(err, &ex) {
+			quotas.WriteExceeded(w, ex)
+			return
+		}
+		if err != nil {
+			s.internal(w, r, "upload quota", err)
+			return
+		}
+		if !s.storeUpload(w, r, m) {
+			res.Release(r.Context())
+		}
+		return
+	}
+	s.storeUpload(w, r, m)
+}
+
+// storeUpload handles the multipart body; created reports whether a new
+// document (and its ingest job) now exists.
+func (s *server) storeUpload(w http.ResponseWriter, r *http.Request, m tenants.Membership) (created bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.Documents.MaxBytes()+multipartOverhead)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid_upload", "expected multipart/form-data with a file field")
-		return
+		return false
 	}
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
 			httpx.Error(w, http.StatusBadRequest, "invalid_upload", "missing file field")
-			return
+			return false
 		}
 		if err != nil {
 			s.uploadError(w, r, err)
-			return
+			return false
 		}
 		if part.FormName() != "file" {
 			_ = part.Close()
@@ -51,14 +76,14 @@ func (s *server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			s.uploadError(w, r, err)
-			return
+			return false
 		}
 		if res.Duplicate {
 			httpx.JSON(w, http.StatusOK, map[string]any{"document": res.Document, "duplicate": true})
-			return
+			return false
 		}
 		httpx.JSON(w, http.StatusAccepted, map[string]any{"document": res.Document, "duplicate": false})
-		return
+		return true
 	}
 }
 

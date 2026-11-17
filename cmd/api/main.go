@@ -13,16 +13,31 @@ import (
 
 	"github.com/kavish924/multi-tenant-rag/internal/api"
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
+	"github.com/kavish924/multi-tenant-rag/internal/breaker"
 	"github.com/kavish924/multi-tenant-rag/internal/config"
+	"github.com/kavish924/multi-tenant-rag/internal/conversations"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
+	"github.com/kavish924/multi-tenant-rag/internal/guard"
+	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
+	"github.com/kavish924/multi-tenant-rag/internal/reranking"
+	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
+	"github.com/kavish924/multi-tenant-rag/internal/usage"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(log); err != nil {
+	log, flush, err := telemetry("api")
+	if err != nil {
+		log.Error("telemetry setup", "err", err)
+		os.Exit(1)
+	}
+	err = run(log)
+	flush()
+	if err != nil {
 		log.Error("api exited", "err", err)
 		os.Exit(1)
 	}
@@ -53,6 +68,33 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	// Questions must be embedded by the same provider as ingestion
+	// (cmd/worker): llm.Fake until the Vertex AI provider lands.
+	// Each provider sits behind its own circuit breaker (QTA-REQ-005).
+	qc := cfg.Quotas
+	var embedder llm.EmbeddingProvider = breaker.Embedder{
+		EmbeddingProvider: llm.Fake{}, B: breaker.New("embed", qc.BreakerThreshold, qc.BreakerOpenFor),
+	}
+	// Gemini on Vertex AI lands with the GCP work; until then a
+	// deterministic extractive fake answers from source 1.
+	var generator llm.Generator = breaker.Generator{
+		Generator: llm.FakeGenerator{}, B: breaker.New("generate", qc.BreakerThreshold, qc.BreakerOpenFor),
+	}
+	limiter := quotas.New(store, quotas.FromConfig(qc.UploadsDay, qc.QuestionsDay, qc.EmbedTokensMonth,
+		qc.GenerateTokensMonth, qc.ConcurrentAsks, qc.ConcurrentJobs))
+	retriever := retrieval.NewHybrid(store, embedder, retrieval.Options{}, log)
+	recorder := usage.NewRecorder(store)
+	ask := &conversations.Handler{
+		Retriever:  retriever,
+		Generator:  generator,
+		Usage:      recorder,
+		Quotas:     limiter,
+		Guards:     guardPolicy(cfg.Guards, generator, log),
+		Rerank:     rerankStage(cfg.Rerank, generator, recorder, log),
+		EmbedModel: embedder.Model(),
+		Log:        log,
+	}
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.New(api.Deps{
@@ -60,6 +102,9 @@ func run(log *slog.Logger) error {
 			Tokens:    tokens,
 			Tenants:   tenants.NewService(store),
 			Documents: documents.NewService(store, objects, cfg.MaxUploadBytes),
+			Retriever: retriever,
+			Quotas:    limiter,
+			Ask:       http.HandlerFunc(ask.Ask),
 			Ready:     store.Ping,
 			Log:       log,
 		}),
@@ -86,4 +131,61 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	return nil
+}
+
+// rerankStage builds the optional rerank stage (spec 009); it is disabled
+// unless RERANK_ENABLED is set.
+func rerankStage(c config.Rerank, gen llm.Generator, rec *usage.Recorder, log *slog.Logger) *reranking.Stage {
+	st := &reranking.Stage{Enabled: c.Enabled, Keep: c.Keep, Timeout: c.Timeout, Log: log}
+	switch c.Provider {
+	case "cross_encoder":
+		st.Reranker = &reranking.CrossEncoder{Endpoint: c.Endpoint, Model: c.Model, Usage: rec}
+	default:
+		st.Reranker = &reranking.LLM{Generator: gen, Usage: rec}
+	}
+	log.Info("rerank stage", "enabled", c.Enabled, "provider", c.Provider, "keep", c.Keep, "timeout", c.Timeout.String())
+	return st
+}
+
+// telemetry installs the Cloud Logging JSON logger and OpenTelemetry
+// (spec 010); the returned func flushes telemetry on exit.
+func telemetry(service string) (*slog.Logger, func(), error) {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(os.Getenv("LOG_LEVEL"))); err != nil {
+		level = slog.LevelInfo
+	}
+	log := observability.NewLogger(os.Stdout, level)
+	slog.SetDefault(log)
+	oc, err := observability.ConfigFromEnv(service)
+	if err != nil {
+		return log, func() {}, err
+	}
+	shutdown, err := observability.Setup(context.Background(), oc)
+	if err != nil {
+		return log, func() {}, err
+	}
+	return log, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+	}, nil
+}
+
+// guardPolicy builds the guardrail policy (spec 012). The faithfulness
+// judge reuses the generation provider (and its circuit breaker).
+func guardPolicy(c config.Guards, judge llm.Generator, log *slog.Logger) *guard.Policy {
+	p := &guard.Policy{
+		Probing:      guard.NewProbing(c.ProbeLimit, time.Minute),
+		OutputMode:   guard.OutputMode(c.OutputMode),
+		WindowBytes:  c.WindowTokens * 4,
+		RedactEmails: c.RedactEmails,
+		Faithfulness: guard.FaithfulnessMode(c.Faithfulness),
+		JudgeTimeout: c.FaithfulnessTimeout,
+		Log:          log,
+	}
+	if p.Faithfulness != guard.FaithfulnessOff {
+		p.Judge = judge
+	}
+	log.Info("guard policy", "output_mode", c.OutputMode, "window_tokens", c.WindowTokens, "faithfulness", c.Faithfulness)
+	return p
 }

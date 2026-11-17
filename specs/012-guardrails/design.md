@@ -100,3 +100,47 @@ purity is asserted, not assumed (GRD-AC-004).
 
 - Streaming granularity vs output-guard safety → **default:** `windowed` mode, bounded buffer
   (≈256 tokens), with `strict` (whole-answer) mode available; document trade-off in README.
+
+## 11. As built
+
+- `guard.Evaluate` / `guard.Run`: stages in order; first Block wins and later stages never run;
+  Redact output feeds the next stage; an error, a panic, an unknown verdict or an expired
+  context is a Block (fail closed). `Decision` carries the stage name (bounded metric label) and
+  a reason code, never text.
+- **Input** (before retrieval): `Length` (1–2,000 runes, valid UTF-8) and `ControlChars`
+  (control and invisible format characters such as zero-width and bidi overrides) → 400.
+  `Probing`: 10 guard blocks per user per minute → 429 `abuse_suspected` (per API instance).
+  Upload size and type are already re-checked inside `documents.Service.Upload`, below the HTTP
+  handler (002), which is the defense-in-depth layer the requirement asks for.
+- **Budget:** `ProviderAvailable` composes the 011 circuit breakers as a stage (→ 503); quotas
+  stay in `quotas.Limiter` (→ 429), run in the same pre-retrieval position.
+- **Retrieval hygiene:** `hydrate.sql` now returns each row's own `tenant_id` and deleted flag;
+  `AssertHygiene` checks tenant purity, deleted exclusion, the per-document cap and duplicate
+  chunks after search and rerank. A violation is refused (SSE `refusal`, stage
+  `retrieval.hygiene`) before the model is called, and logged as `ALERT`.
+- **Prompt:** delimiters and the context budget stay in `conversations.BuildPrompt` (008),
+  highest-ranked first; a test asserts the system prompt matches no secret pattern.
+- **Tools:** `guard.Tools` is an empty allowlist; `Authorize` requires an allowlisted name,
+  schema validation (registration panics without it) and human confirmation for consequential
+  tools. The generator interface has no tool calls, so an injected document has nothing to
+  trigger.
+- **Output, streaming:** `guard.Output` holds back a window (default 1,024 bytes ≈ 256 tokens,
+  minimum 256) and runs `Redactor` (AWS/Google/GitHub/Slack/`sk-` keys, JWTs, private IPv4,
+  emails optional) and `LeakDetector` (any 8-word run of the system prompt) every 128 new bytes.
+  Text is released only right after a run with the full window behind it, so a pattern shorter
+  than the window is redacted before any of it leaves. A private-key header blocks the answer
+  (a key block can outlast the window). `strict` mode releases nothing until the final stages pass.
+- **Output, final:** optional `Faithfulness` (`off` | `warn` | `block`): a judge model (the
+  generation provider) answers `SUPPORTED` / `UNSUPPORTED` / `REFUSAL` within 1.5 s; in block
+  mode an unsupported answer, a timeout, a judge error or an unparseable reply blocks.
+- **Refusal:** SSE `event: refusal` `{"code":"guard_blocked","stage","message","discard"}`;
+  `discard: true` means text was already released (windowed mode) and the client must remove it.
+  A provider failure mid-stream discards the unreleased tail (it never passed the final checks).
+- **Citations:** resolved server-side from this request's sources (008); an answer with sources
+  but no citation increments `uncited_answers_total` (soft signal).
+- **Telemetry:** `guard_verdicts_total{stage,verdict,tenant_id}` for every Block and Redact
+  (`stage` and `verdict` added to the metric label allowlist) and a structured log without text.
+- **Config:** `GUARD_OUTPUT_MODE` (windowed), `GUARD_WINDOW_TOKENS` (256), `GUARD_REDACT_EMAILS`
+  (false), `GUARD_FAITHFULNESS` (off), `GUARD_FAITHFULNESS_TIMEOUT` (1.5s), `GUARD_PROBE_LIMIT` (10).
+- **Overhead:** `BenchmarkDeterministicStages` (input stages + streaming filter over a ~2 KB
+  answer fed word by word): ≈ 2.2 ms per answer on a laptop, within the 20 ms budget.
