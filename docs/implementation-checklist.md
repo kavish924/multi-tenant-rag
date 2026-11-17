@@ -46,8 +46,8 @@ Reference: [gcp-environment.md](gcp-environment.md) §2–§4, §10 (free-trial 
 - [ ] `internal/` package layout per [system-architecture.md](system-architecture.md#internal-package-layout)
 - [x] Config loading from env; health endpoint on `api`
 - [x] `Makefile`: `up`, `down`, `migrate`, `test`, `itest`, `lint`, `run-api`, `run-worker`
-- [x] `deployments/compose.yaml` (Cloud Shell dev stack; postgres now, fake-gcs and otel with 003/010): `pgvector/pgvector`, `fake-gcs-server`,
-      `otel-collector`
+- [ ] `deployments/compose.yaml` (Cloud Shell dev stack): `pgvector/pgvector`, `fake-gcs-server`,
+      `otel-collector` *(postgres and otel-collector done; fake-gcs-server lands with the Cloud Storage store)*
 - [x] Dockerfiles (minimal base image) for each binary
 - [x] `cloudbuild.yaml`: vet → lint → `go test` → `go test -race` → integration → build → push
 - [x] Linter config; `migrations/` directory wired to the chosen tool
@@ -64,20 +64,20 @@ Reference: [gcp-environment.md](gcp-environment.md) §2–§4, §10 (free-trial 
 pulled forward here.
 
 - [ ] **[001 Tenancy & identity](../specs/001-tenancy-identity/tasks.md)**
-  - [ ] Schema + forced RLS + `app` role (Group 1.1–1.3)
-  - [ ] `app_system` role, `system_access` policy, `memberships_for_user` (1.4)
-  - [ ] Cloud SQL IAM role mapping in Terraform (1.5)
-  - [ ] Auth: argon2id, JWT, register / login / me (Group 2)
-  - [ ] Middleware chain: Authenticate → ResolveTenant → Authorize (Group 3)
-  - [ ] Security tests incl. no-context zero rows and the closed system-function list (Group 5)
+  - [x] Schema + forced RLS + `app` role (Group 1.1–1.3)
+  - [x] `app_system` role, `system_access` policy, `memberships_for_user` (1.4)
+  - [ ] Cloud SQL IAM role mapping in Terraform (1.5) *(grant mechanism in `cmd/migrate` done; Terraform IAM users written, not applied)*
+  - [x] Auth: argon2id, JWT, register / login / me (Group 2)
+  - [x] Middleware chain: Authenticate → ResolveTenant → Authorize (Group 3)
+  - [ ] Security tests incl. no-context zero rows and the closed system-function list (Group 5) *(written, not yet run)*
 - [ ] **Pulled forward:** [003](../specs/003-object-storage/tasks.md) Group 1 (interface + `DocumentKey`) and 2.1 (Cloud Storage impl) *(interface, key builder and local fs store done; Cloud Storage impl pending GCP)*
 - [x] **Pulled forward:** [004](../specs/004-job-queue/tasks.md) 1.1 (`jobs` table) and 2.1 (`Enqueue`) *(whole queue + worker runtime done; DB tests not yet run)*
 - [ ] **[002 Document management](../specs/002-document-management/tasks.md)**
-  - [ ] `documents` table, partial unique dedup index (Group 1)
-  - [ ] Signature sniffer + size-limited reader (Group 2)
-  - [ ] Upload: store object → document row + ingest job in one tx; dedup; compensation (Group 3)
-  - [ ] List / get / soft delete (row-locking `UPDATE`) / 410 on deleted content (Group 4)
-  - [ ] Integration, cross-tenant, and concurrent-duplicate tests (Group 5)
+  - [x] `documents` table, partial unique dedup index (Group 1)
+  - [x] Signature sniffer + size-limited reader (Group 2)
+  - [x] Upload: store object → document row + ingest job in one tx; dedup; compensation (Group 3)
+  - [x] List / get / soft delete (row-locking `UPDATE`) / 410 on deleted content (Group 4)
+  - [ ] Integration, cross-tenant, and concurrent-duplicate tests (Group 5) *(written with the fs store, not yet run)*
 - [ ] Deployed to dev; smoke test: register → create tenant → upload → list
 
 **Exit gate:** tenant-scoped API tests pass (TEN-AC-001…010, DOC tests green in Cloud Build).
@@ -88,14 +88,14 @@ pulled forward here.
 
 - [ ] Specs 003–006 **Approved**
 - [ ] **[003 Object storage](../specs/003-object-storage/tasks.md)** — remainder
-  - [ ] Bucket Terraform: uniform access, public access prevention, scoped IAM (2.1a)
-  - [ ] Idempotent delete; content endpoint with V4 signed URLs via IAM `signBlob` (2.2, Group 3)
+  - [ ] Bucket Terraform: uniform access, public access prevention, scoped IAM (2.1a) *(written, not applied)*
+  - [ ] Idempotent delete; content endpoint with V4 signed URLs via IAM `signBlob` (2.2, Group 3) *(fs store + streaming content endpoint done; GCS delete and signed URLs pending GCP)*
   - [ ] Signed-URL replay / tamper test against the real dev bucket (4.2)
 - [ ] **[004 Job queue](../specs/004-job-queue/tasks.md)** — remainder
-  - [ ] `claim_job` system function (reap-then-claim) + `system_access` on `jobs` (2.2)
-  - [ ] Heartbeat / Complete / Fail guarded by `locked_by`; backoff (2.3–2.4)
-  - [ ] Worker loop: semaphore before claim, SIGTERM shutdown, lease takeover (Group 3)
-  - [ ] Concurrency, crash, retry-ladder, **poison-pill**, RLS, load tests (Group 4)
+  - [x] `claim_job` system function (reap-then-claim) + `system_access` on `jobs` (2.2)
+  - [x] Heartbeat / Complete / Fail guarded by `locked_by`; backoff (2.3–2.4)
+  - [x] Worker loop: semaphore before claim, SIGTERM shutdown, lease takeover (Group 3)
+  - [ ] Concurrency, crash, retry-ladder, **poison-pill**, RLS, load tests (Group 4) *(concurrency, retry-ladder, poison-pill and RLS written, not yet run; SIGKILL crash and load tests not written)*
 - [ ] **[005 Ingestion pipeline](../specs/005-ingestion-pipeline/tasks.md)**
   - [x] Extractors in a subprocess with Linux rlimits + hostile fixture corpus (Group 1)
   - [x] Chunker + ordinal-stability test (Group 2)
@@ -119,7 +119,7 @@ pulled forward here.
 - [ ] Specs 007–009 and **014** **Approved** (the exit gate needs the golden dataset)
 - [ ] **Start early:** [014](../specs/014-evaluation/tasks.md) 1.1 — `golden.jsonl` (≥ 50 cases, 2+ tenants) + fixture corpus + thresholds
 - [ ] **[007 Hybrid retrieval](../specs/007-hybrid-retrieval/tasks.md)**
-  - [x] `hybrid.sql` (vector + full text + RRF), deleted-document join, per-document cap (Group 1)
+  - [x] Hybrid query (`vector.sql` + `fulltext.sql` + `hydrate.sql`, RRF in Go), deleted-document filter, per-document cap (Group 1)
   - [ ] Iterative scan or over-fetch decision, tested with the **smallest tenant** (2.1) *(decided and coded; test not yet run)*
   - [ ] RRF unit tests, seeded multi-tenant suite, latency benchmark (Group 3) *(unit tests pass; suite written, not run; benchmark pending)*
 - [ ] **[008 Generation & citations](../specs/008-generation-citations/tasks.md)**
