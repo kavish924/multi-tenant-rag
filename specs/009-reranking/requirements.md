@@ -1,7 +1,7 @@
 # 009 — Reranking (Optional Stage): Requirements
 
 - **Spec ID:** 009 `RER`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 3 — RAG end to end
 - **Depends on:** `specs/007-hybrid-retrieval`, `specs/008-generation-citations`
 - **Shared context:** `docs/system-design.md §5` (rerank note: measure before keeping)

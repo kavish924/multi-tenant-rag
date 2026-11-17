@@ -129,7 +129,7 @@ pulled forward here.
   - [x] `ResolveCitations`, usage rows, disconnect propagation, citation re-authorization (Group 2)
   - [ ] SSE, citation, zero-hit, and failure-path tests (Group 3) *(unit tests pass; end-to-end DB suite written, not yet run)*
 - [ ] **[009 Reranking](../specs/009-reranking/tasks.md)** (optional stage, off by default)
-  - [ ] Interface + implementation(s) + timeout / fail-open (Groups 1–2)
+  - [ ] Interface + implementation(s) + timeout / fail-open (Groups 1–2) *(all done in code; cross-encoder credentials pending GCP; usage DB test not yet run)*
   - [ ] Keep only if the A/B eval shows it earns its latency and cost (3.2)
 - [ ] [014](../specs/014-evaluation/tasks.md) harness core: run, retrieval metrics, judge, citations, refusals, gate (2.1–2.6)
 

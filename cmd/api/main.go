@@ -17,6 +17,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/conversations"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
@@ -64,10 +65,12 @@ func run(log *slog.Logger) error {
 	// deterministic extractive fake answers from source 1.
 	var generator llm.Generator = llm.FakeGenerator{}
 	retriever := retrieval.NewHybrid(store, embedder, retrieval.Options{}, log)
+	recorder := usage.NewRecorder(store)
 	ask := &conversations.Handler{
 		Retriever:  retriever,
 		Generator:  generator,
-		Usage:      usage.NewRecorder(store),
+		Usage:      recorder,
+		Rerank:     rerankStage(cfg.Rerank, generator, recorder, log),
 		EmbedModel: embedder.Model(),
 		Log:        log,
 	}
@@ -107,4 +110,18 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	return nil
+}
+
+// rerankStage builds the optional rerank stage (spec 009); it is disabled
+// unless RERANK_ENABLED is set.
+func rerankStage(c config.Rerank, gen llm.Generator, rec *usage.Recorder, log *slog.Logger) *reranking.Stage {
+	st := &reranking.Stage{Enabled: c.Enabled, Keep: c.Keep, Timeout: c.Timeout, Log: log}
+	switch c.Provider {
+	case "cross_encoder":
+		st.Reranker = &reranking.CrossEncoder{Endpoint: c.Endpoint, Model: c.Model, Usage: rec}
+	default:
+		st.Reranker = &reranking.LLM{Generator: gen, Usage: rec}
+	}
+	log.Info("rerank stage", "enabled", c.Enabled, "provider", c.Provider, "keep", c.Keep, "timeout", c.Timeout.String())
+	return st
 }

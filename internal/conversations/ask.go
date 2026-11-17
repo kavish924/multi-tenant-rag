@@ -12,6 +12,7 @@ import (
 
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 	"github.com/kavish924/multi-tenant-rag/internal/usage"
@@ -30,6 +31,9 @@ type Handler struct {
 	Retriever retrieval.Retriever
 	Generator llm.Generator
 	Usage     *usage.Recorder // nil disables usage recording (unit tests)
+	// Rerank is the optional stage between fusion and prompt (009); nil or
+	// disabled passes the fused top-K straight through.
+	Rerank *reranking.Stage
 	// EmbedModel names the question embedder for the embed usage row.
 	EmbedModel       string
 	TopK             int
@@ -75,7 +79,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context() // cancelled when the client disconnects (GEN-REQ-004)
 
-	hits, err := h.Retriever.Search(ctx, m.TenantID, question, h.topK())
+	hits, err := h.Retriever.Search(ctx, m.TenantID, question, h.Rerank.Want(h.topK()))
 	if err != nil {
 		if errors.Is(err, retrieval.ErrEmptyQuestion) || errors.Is(err, retrieval.ErrQuestionTooLong) {
 			httpx.Error(w, http.StatusBadRequest, "invalid_question", err.Error())
@@ -93,6 +97,12 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		TenantID: m.TenantID, Kind: usage.KindEmbed, Model: h.EmbedModel,
 		InputTokens: llm.ApproxTokens(question),
 	})
+	if h.Rerank.Active() {
+		// Fails open: any reranker problem keeps the fused order (RER-REQ-003).
+		hits = h.Rerank.Apply(ctx, m.TenantID, question, hits)
+	} else if len(hits) > h.topK() {
+		hits = hits[:h.topK()]
+	}
 
 	hd := w.Header()
 	hd.Set("Content-Type", "text/event-stream")
@@ -218,10 +228,10 @@ func chunkIDs(hits []retrieval.Hit) []string {
 }
 
 func (h *Handler) topK() int {
-	if h.TopK <= 0 {
-		return DefaultTopK
+	if h.TopK > 0 {
+		return h.TopK
 	}
-	return h.TopK
+	return h.Rerank.KeepOr(DefaultTopK)
 }
 
 func (h *Handler) maxOutput() int {

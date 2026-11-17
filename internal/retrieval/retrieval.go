@@ -58,6 +58,8 @@ type Hit struct {
 	// Leg ranks (1-based; 0 = not found by that leg), for evaluation (014).
 	VectorRank int `json:"vector_rank,omitempty"`
 	TextRank   int `json:"text_rank,omitempty"`
+	// RerankScore is set when the optional rerank stage (009) ordered the hit.
+	RerankScore float64 `json:"rerank_score,omitempty"`
 }
 
 // Retriever is the search interface generation depends on (RET-US-3).

@@ -35,6 +35,57 @@ type API struct {
 
 	Objects        Objects
 	MaxUploadBytes int64
+	Rerank         Rerank
+}
+
+// Rerank configures the optional rerank stage (spec 009). It is per
+// deployment, never per request (RER-REQ-002).
+type Rerank struct {
+	Enabled  bool          // RERANK_ENABLED, default false
+	Provider string        // RERANK_PROVIDER: "llm" or "cross_encoder"
+	Keep     int           // RERANK_KEEP, default 8
+	Timeout  time.Duration // RERANK_TIMEOUT, default 800ms
+	Endpoint string        // RERANK_ENDPOINT, required for cross_encoder
+	Model    string        // RERANK_MODEL, optional
+}
+
+// LoadRerank reads the rerank settings.
+func LoadRerank() (Rerank, error) {
+	r := Rerank{
+		Provider: env("RERANK_PROVIDER", "llm"),
+		Keep:     8,
+		Timeout:  800 * time.Millisecond,
+		Endpoint: os.Getenv("RERANK_ENDPOINT"),
+		Model:    os.Getenv("RERANK_MODEL"),
+	}
+	switch v := strings.ToLower(os.Getenv("RERANK_ENABLED")); v {
+	case "", "false", "0", "no":
+	case "true", "1", "yes":
+		r.Enabled = true
+	default:
+		return Rerank{}, fmt.Errorf("config: RERANK_ENABLED %q is not a boolean", v)
+	}
+	var err error
+	if r.Keep, err = intEnv("RERANK_KEEP", r.Keep, 1, 50); err != nil {
+		return Rerank{}, err
+	}
+	if v := os.Getenv("RERANK_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 || d > 10*time.Second {
+			return Rerank{}, errors.New("config: RERANK_TIMEOUT must be a duration in (0, 10s]")
+		}
+		r.Timeout = d
+	}
+	switch r.Provider {
+	case "llm":
+	case "cross_encoder":
+		if r.Enabled && r.Endpoint == "" {
+			return Rerank{}, errors.New("config: RERANK_ENDPOINT is required for RERANK_PROVIDER=cross_encoder")
+		}
+	default:
+		return Rerank{}, fmt.Errorf("config: RERANK_PROVIDER %q must be llm or cross_encoder", r.Provider)
+	}
+	return r, nil
 }
 
 // Objects selects the object store. Only "fs" (local directory, for
@@ -144,6 +195,9 @@ func LoadAPI() (API, error) {
 			return API{}, errors.New("config: MAX_UPLOAD_BYTES must be a positive integer")
 		}
 		cfg.MaxUploadBytes = n
+	}
+	if cfg.Rerank, err = LoadRerank(); err != nil {
+		return API{}, err
 	}
 	return cfg, nil
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
@@ -103,12 +105,68 @@ func TestBuildPromptBudget(t *testing.T) {
 }
 
 type fakeRetriever struct {
-	hits []retrieval.Hit
-	err  error
+	hits  []retrieval.Hit
+	err   error
+	limit *int // records the requested limit
 }
 
-func (f fakeRetriever) Search(context.Context, uuid.UUID, string, int) ([]retrieval.Hit, error) {
+func (f fakeRetriever) Search(_ context.Context, _ uuid.UUID, _ string, limit int) ([]retrieval.Hit, error) {
+	if f.limit != nil {
+		*f.limit = limit
+	}
+	if len(f.hits) > limit {
+		return f.hits[:limit], f.err
+	}
 	return f.hits, f.err
+}
+
+type reverser struct{ calls int }
+
+func (r *reverser) Rerank(_ context.Context, _ uuid.UUID, _ string, hits []retrieval.Hit, keep int) ([]retrieval.Hit, error) {
+	r.calls++
+	out := make([]retrieval.Hit, 0, keep)
+	for i := len(hits) - 1; i >= 0 && len(out) < keep; i-- {
+		out = append(out, hits[i])
+	}
+	return out, nil
+}
+
+// Spec 009 in the ask path: the enabled stage fetches the candidate pool,
+// and citation [1] resolves to the reranked first hit.
+func TestAskWithRerank(t *testing.T) {
+	src := hits(make([]string, 60)...)
+	for i := range src {
+		src[i].Content = fmt.Sprintf("Passage %d.", i)
+	}
+	var limit int
+	rr := &reverser{}
+	h := &Handler{
+		Retriever: fakeRetriever{hits: src, limit: &limit},
+		Generator: llm.FakeGenerator{},
+		Rerank:    &reranking.Stage{Enabled: true, Reranker: rr},
+	}
+	srv := server(h)
+	defer srv.Close()
+	_, evs := ask(t, srv, "q")
+	if limit != reranking.DefaultCandidates || rr.calls != 1 {
+		t.Fatalf("retrieval limit %d, rerank calls %d", limit, rr.calls)
+	}
+	var cite map[string]any
+	for _, e := range evs {
+		if e.event == "citation" {
+			cite = e.data
+		}
+	}
+	if cite == nil || cite["chunk_id"] != src[49].ChunkID.String() {
+		t.Errorf("citation %v, want reranked first hit %s", cite, src[49].ChunkID)
+	}
+
+	// Disabled stage: top-8 straight from retrieval, no rerank call.
+	h.Rerank = &reranking.Stage{Enabled: false, Reranker: rr}
+	_, _ = ask(t, srv, "q")
+	if limit != DefaultTopK || rr.calls != 1 {
+		t.Errorf("disabled: limit %d, rerank calls %d", limit, rr.calls)
+	}
 }
 
 type sse struct {
