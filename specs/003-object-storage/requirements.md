@@ -1,7 +1,7 @@
 # 003 — Object Storage: Requirements
 
 - **Spec ID:** 003 `STO`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 2 — Async ingestion
 - **Depends on:** `specs/001-tenancy-identity`, `specs/002-document-management`
 - **Shared context:** `docs/tech-stack.md` (files), `docs/system-design.md §1` (storage isolation layer)

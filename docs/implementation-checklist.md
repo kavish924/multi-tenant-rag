@@ -20,7 +20,7 @@
 - [ ] **Vertex AI embedding model** chosen → `EMBEDDING_DIM` fixed; `vector` (≤ 2,000 dims) vs
       `halfvec` (≤ 4,000) decided ([005 design §10](../specs/005-ingestion-pipeline/design.md))
 - [ ] Vertex AI generation model chosen
-- [x] Go version pinned; HTTP router (`net/http` mux or `chi`); `sqlc` yes/no → Go 1.25, standard `net/http` mux, no `sqlc` (hand-written pgx)
+- [x] Go version pinned; HTTP router (`net/http` mux or `chi`); `sqlc` yes/no → Go 1.27 toolchain (`go 1.26.0` in go.mod, set by dependencies), standard `net/http` mux, no `sqlc` (hand-written pgx)
 - [x] Migration tool (`goose` or `golang-migrate`) → `goose` v3, migrations embedded and run by `cmd/migrate`
 - [x] JWT algorithm (HS256 or EdDSA) — key lives in Secret Manager → HS256, `JWT_SIGNING_KEY` ≥ 32 bytes
 - [ ] Tokenizer library for chunking ([005 design §10](../specs/005-ingestion-pipeline/design.md))
@@ -70,8 +70,8 @@ pulled forward here.
   - [ ] Auth: argon2id, JWT, register / login / me (Group 2)
   - [ ] Middleware chain: Authenticate → ResolveTenant → Authorize (Group 3)
   - [ ] Security tests incl. no-context zero rows and the closed system-function list (Group 5)
-- [ ] **Pulled forward:** [003](../specs/003-object-storage/tasks.md) Group 1 (interface + `DocumentKey`) and 2.1 (Cloud Storage impl)
-- [ ] **Pulled forward:** [004](../specs/004-job-queue/tasks.md) 1.1 (`jobs` table) and 2.1 (`Enqueue`)
+- [ ] **Pulled forward:** [003](../specs/003-object-storage/tasks.md) Group 1 (interface + `DocumentKey`) and 2.1 (Cloud Storage impl) *(interface, key builder and local fs store done; Cloud Storage impl pending GCP)*
+- [x] **Pulled forward:** [004](../specs/004-job-queue/tasks.md) 1.1 (`jobs` table) and 2.1 (`Enqueue`) *(whole queue + worker runtime done; DB tests not yet run)*
 - [ ] **[002 Document management](../specs/002-document-management/tasks.md)**
   - [ ] `documents` table, partial unique dedup index (Group 1)
   - [ ] Signature sniffer + size-limited reader (Group 2)

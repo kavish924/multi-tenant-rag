@@ -47,8 +47,8 @@ same browser-only workflow at no cost.
 
 **Cloud Shell** (console → `>_` icon, or full screen at `shell.cloud.google.com`):
 
-- Free; Go, Docker, `gcloud`, Terraform, `psql`, and git are preinstalled. `go.mod` pins Go 1.25;
-  with the default `GOTOOLCHAIN=auto`, an older preinstalled Go downloads 1.25 automatically.
+- Free; Go, Docker, `gcloud`, Terraform, `psql`, and git are preinstalled. `go.mod` requires Go 1.26+ (CI uses 1.27);
+  with the default `GOTOOLCHAIN=auto`, an older preinstalled Go downloads the required toolchain automatically.
 - 5 GB persistent `$HOME` (repo clone and module cache); the VM itself is ephemeral, and there is
   a weekly usage quota. Docker images and containers do not survive a session restart.
 - Built-in editor (Code OSS based) via **Open Editor**.

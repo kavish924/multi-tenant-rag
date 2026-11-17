@@ -13,17 +13,19 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
+	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
 
 // Deps are the services the API needs.
 type Deps struct {
-	Users   *auth.Service
-	Tokens  TokenVerifier
-	Tenants *tenants.Service
-	Ready   func(context.Context) error
-	Log     *slog.Logger
+	Users     *auth.Service
+	Tokens    TokenVerifier
+	Tenants   *tenants.Service
+	Documents *documents.Service // optional: document routes are mounted only when set
+	Ready     func(context.Context) error
+	Log       *slog.Logger
 }
 
 type server struct{ Deps }
@@ -51,10 +53,20 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /me", authn(http.HandlerFunc(s.me)))
 
 	mux.Handle("POST /tenants", authn(http.HandlerFunc(s.createTenant)))
-	mux.Handle("GET /tenants/{id}/members", tenantRoute(tenants.RoleAdmin, s.listMembers))
-	mux.Handle("POST /tenants/{id}/members", tenantRoute(tenants.RoleAdmin, s.addMember))
-	mux.Handle("PATCH /tenants/{id}/members/{uid}", tenantRoute(tenants.RoleOwner, s.changeRole))
-	mux.Handle("DELETE /tenants/{id}/members/{uid}", tenantRoute(tenants.RoleOwner, s.removeMember))
+	mux.Handle("GET /tenants/{tenant}/members", tenantRoute(tenants.RoleAdmin, s.listMembers))
+	mux.Handle("POST /tenants/{tenant}/members", tenantRoute(tenants.RoleAdmin, s.addMember))
+	mux.Handle("PATCH /tenants/{tenant}/members/{uid}", tenantRoute(tenants.RoleOwner, s.changeRole))
+	mux.Handle("DELETE /tenants/{tenant}/members/{uid}", tenantRoute(tenants.RoleOwner, s.removeMember))
+
+	// Documents live in the tenant chosen by X-Tenant-ID (or the sole
+	// membership); {id} is always a document id here.
+	if d.Documents != nil {
+		mux.Handle("POST /documents", tenantRoute(tenants.RoleMember, s.uploadDocument))
+		mux.Handle("GET /documents", tenantRoute(tenants.RoleMember, s.listDocuments))
+		mux.Handle("GET /documents/{id}", tenantRoute(tenants.RoleMember, s.getDocument))
+		mux.Handle("DELETE /documents/{id}", tenantRoute(tenants.RoleMember, s.deleteDocument))
+		mux.Handle("GET /documents/{id}/content", tenantRoute(tenants.RoleMember, s.documentContent))
+	}
 
 	return logRequests(d.Log, mux)
 }

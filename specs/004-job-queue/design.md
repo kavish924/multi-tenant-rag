@@ -16,12 +16,15 @@ worker loop. **Out:** pipeline stages (`005`), broker relay (`006`), queue metri
 ## 3. Components
 
 - `internal/jobs`: `Queue` interface (`Enqueue`, `Claim`, `Heartbeat`, `Complete`, `Fail`),
-  `Claim` calling the `claim_job` system function (`migrations/0004_claim_job.sql`), `Backoff(attempts)` helper.
-- `cmd/worker`: loop with `sem` semaphore + `WaitGroup` (per JOB-REQ-009/AC-009).
+  `Claim` calling the `claim_job` system function (`migrations/0004_jobs.sql`), `Backoff(attempts)` helper,
+  `Permanent(err)` to dead-letter without retries.
+- `internal/jobs.Runner`: loop with `sem` semaphore + `WaitGroup` (per JOB-REQ-009/AC-009),
+  heartbeat ticker, panic recovery; handlers get a `TenantTx` bound to `job.TenantID`.
+- `cmd/worker`: wires the runner; handlers are registered as `005`/`013` land.
 
 ## 4. Data model changes
 
-`jobs` table (in `0001_init.sql`): `id, tenant_id, kind, payload jsonb,
+`jobs` table (`migrations/0004_jobs.sql`, with RLS and `claim_job`): `id, tenant_id, kind, payload jsonb,
 status CHECK IN ('queued','running','succeeded','failed','dead'), attempts, max_attempts
 (default 5), run_at, lease_expires_at, locked_by, idempotency_key, last_error`,
 `UNIQUE (tenant_id, idempotency_key)` (partial: `WHERE idempotency_key IS NOT NULL`).
@@ -32,25 +35,25 @@ Claim-supporting index: `(status, run_at)`.
 
 ```go
 type Job struct { ID, TenantID uuid.UUID; Kind string; Payload []byte; Attempts, MaxAttempts int }
-Enqueue(ctx, tx pgx.Tx, kind string, tenantID uuid.UUID, payload []byte, idemKey string, runAt *time.Time) (uuid.UUID, error)
-Claim(ctx, workerID string) (*Job, error)   // nil,nil when queue empty
-Heartbeat(ctx, jobID uuid.UUID, workerID string) error
-Complete(ctx, jobID uuid.UUID) error
-Fail(ctx, jobID uuid.UUID, cause error) error // retry or dead per attempts
+jobs.Enqueue(ctx, tx pgx.Tx, EnqueueParams{TenantID, Kind, Payload, IdempotencyKey, RunAt, MaxAttempts}) (id uuid.UUID, created bool, err error)
+(*Queue).Claim(ctx, workerID string, kinds []string) (*Job, error)      // nil,nil when nothing runnable
+(*Queue).Heartbeat(ctx, job Job, workerID string) error                  // ErrLeaseLost if taken over
+(*Queue).Complete(ctx, job Job, workerID string) error
+(*Queue).Fail(ctx, job Job, workerID string, cause error) (dead bool, err error)
 ```
 
 ## 6. Key flows
 
 **Claim:** `jobs` is under forced RLS and the claim must see every tenant's jobs, so it is the
-`claim_job(worker_id, lease)` system function (`migrations/0004_claim_job.sql`, full SQL in
+`claim_job(worker_id, lease, kinds)` system function (`migrations/0004_jobs.sql`, full SQL in
 [system-design.md §4](../../docs/system-design.md#claiming-a-job)). `Claim` runs
-`SELECT * FROM claim_job($1, interval '60 seconds')`. The same migration grants `app_system`
+`SELECT * FROM claim_job($1, $2, $3)` (lease 60 s, the worker's handler kinds). The same migration grants `app_system`
 `SELECT, UPDATE` on `jobs` and adds `CREATE POLICY system_access ON jobs TO app_system USING
 (true) WITH CHECK (true)` — no `BYPASSRLS` (unavailable on Cloud SQL). The function, in one
 statement:
 
 1. **Reaps** expired-lease jobs with `attempts >= max_attempts` → `dead` (JOB-REQ-011).
-2. **Claims** one job: `queued AND run_at <= now()` OR expired lease `AND attempts < max_attempts`,
+2. **Claims** one job of the requested kinds: `queued AND run_at <= now()` OR expired lease `AND attempts < max_attempts`,
    `ORDER BY run_at FOR UPDATE SKIP LOCKED LIMIT 1` → `running`, lease, `attempts + 1`.
 
 `Heartbeat`/`Complete`/`Fail` run as plain statements inside `WithTenant(job.TenantID)`, each

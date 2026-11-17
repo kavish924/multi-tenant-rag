@@ -39,7 +39,8 @@ var (
 )
 
 // chain builds Authenticate → ResolveTenant → Authorize(min) around a
-// handler that echoes the resolved tenant id, on a mux route with {id}.
+// handler that echoes the resolved tenant id, on mux routes with {tenant}
+// and with a non-tenant {id}.
 func chain(min tenants.Role) http.Handler {
 	tokens := fakeTokens{"tok-a": userA, "tok-b": userB}
 	ms := fakeMemberships{
@@ -53,8 +54,9 @@ func chain(min tenants.Role) http.Handler {
 	})
 	h := Authenticate(tokens)(ResolveTenant(ms, log)(Authorize(min)(echo)))
 	mux := http.NewServeMux()
-	mux.Handle("GET /tenants/{id}/x", h)
+	mux.Handle("GET /tenants/{tenant}/x", h)
 	mux.Handle("GET /x", h)
+	mux.Handle("GET /docs/{id}", h)
 	return mux
 }
 
@@ -185,5 +187,19 @@ func TestResolveTenantDBErrorIs500(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status %d, want 500", rec.Code)
+	}
+}
+
+// A non-tenant path id (for example a document id) is never used as the
+// tenant selector.
+func TestResolveTenantIgnoresNonTenantPathID(t *testing.T) {
+	h := chain(tenants.RoleMember)
+	rec := do(h, "/docs/"+tenantB.String(), "tok-b", nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != tenantB.String() {
+		t.Fatalf("sole membership: %d %q", rec.Code, rec.Body)
+	}
+	// userA has two tenants and no header: the {id} must not pick one.
+	if rec := do(h, "/docs/"+tenantA.String(), "tok-a", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("document id used as tenant selector: status %d", rec.Code)
 	}
 }

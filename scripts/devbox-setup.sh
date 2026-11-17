@@ -12,7 +12,7 @@
 # (Compute Engine → devbox → Stop); a stopped VM only bills its disk.
 set -euo pipefail
 
-GO_VERSION="${GO_VERSION:-1.25.4}"
+GO_VERSION="${GO_VERSION:-1.27.4}"
 GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.5.0}"
 
 sudo apt-get update

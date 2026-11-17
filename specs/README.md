@@ -28,9 +28,9 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | Spec | Feature | Milestone | Status |
 | ---- | ------- | --------- | ------ |
 | [001](./001-tenancy-identity/) | Tenancy & identity | 1 — Working Go API | In progress |
-| [002](./002-document-management/) | Document management | 1 — Working Go API | Draft |
-| [003](./003-object-storage/) | Object storage | 2 — Async ingestion | Draft |
-| [004](./004-job-queue/) | Job queue (PostgreSQL) | 2 — Async ingestion | Draft |
+| [002](./002-document-management/) | Document management | 1 — Working Go API | In progress |
+| [003](./003-object-storage/) | Object storage | 2 — Async ingestion | In progress |
+| [004](./004-job-queue/) | Job queue (PostgreSQL) | 2 — Async ingestion | In progress |
 | [005](./005-ingestion-pipeline/) | Ingestion pipeline | 2 — Async ingestion | Draft |
 | [006](./006-outbox-messaging/) | Outbox messaging | 2 — Async ingestion | Draft |
 | [007](./007-hybrid-retrieval/) | Hybrid retrieval (RRF) | 3 — RAG end to end | Draft |

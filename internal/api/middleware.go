@@ -49,7 +49,7 @@ func Authenticate(tokens TokenVerifier) func(http.Handler) http.Handler {
 }
 
 // ResolveTenant picks the request's tenant from the verified membership list
-// (TEN-REQ-006). The selector is the {id} path value when the route has one,
+// (TEN-REQ-006). The selector is the {tenant} path value when the route has one,
 // otherwise the X-Tenant-ID header, otherwise the user's sole membership.
 // A selector the user is not a member of is answered 404, hiding whether the
 // tenant exists (TEN-AC-003). Client input only selects among the user's own
@@ -69,7 +69,7 @@ func ResolveTenant(ms MembershipLister, log *slog.Logger) func(http.Handler) htt
 				return
 			}
 
-			selector := r.PathValue("id")
+			selector := r.PathValue("tenant")
 			if selector == "" {
 				selector = strings.TrimSpace(r.Header.Get(TenantHeader))
 			}

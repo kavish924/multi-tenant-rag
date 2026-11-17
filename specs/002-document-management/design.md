@@ -17,24 +17,25 @@ failed to commit" (and vice versa).
 ## 3. Components
 
 - `internal/documents` — service: validate, hash, dedup, persist; `Status` constants.
-- `internal/ingestion/extract` — signature sniffing helpers (PDF `%PDF-`, DOCX `PK\x03\x04`, UTF-8 text heuristic).
+- `internal/documents` (`sniff.go`) — signature sniffing (PDF `%PDF-`, DOCX `PK\x03\x04`, UTF-8 text heuristic).
 - `internal/jobs` — `Queue.Enqueue` interface call (impl in `004`).
 - `cmd/api` — handlers under `/documents`.
 
 ## 4. Data model changes
 
-`documents` table (in `0001_init.sql`): `id, tenant_id, filename, content_type, size_bytes,
+`documents` table (`migrations/0005_documents.sql`): `id, tenant_id, filename, content_type, size_bytes,
 object_key, sha256, status CHECK IN ('uploaded','queued','processing','indexed','failed','deleting','deleted'),
 error, created_at, deleted_at`, partial unique `(tenant_id, sha256) WHERE deleted_at IS NULL`
 (re-uploading a deleted file is allowed). Index `(tenant_id, created_at DESC)` for listing.
-`deleted` is set by the cleanup job (`013`); `deleted_at IS NOT NULL` is sticky — no later
-status write may clear it.
+`deleted` is set by the cleanup job (`013`); `deleted_at IS NOT NULL` is sticky — a trigger rejects
+any write that clears or changes it. A CHECK pins `object_key` to
+`tenants/{tenant_id}/documents/{id}` so layer 3 is enforced by the schema too.
 
 ## 5. API contract
 
 | Method | Path | Notes |
 | ------ | ---- | ----- |
-| POST | `/documents` | multipart `file`; 202 → `{id, status:"queued"}`; 200 + `duplicate:true` on dedup hit |
+| POST | `/documents` | multipart `file`; 202 → `{document, duplicate:false}`; 200 → `{document, duplicate:true}` on dedup hit |
 | GET | `/documents?limit&cursor&status` | 200 → `{items[], next_cursor}` (excludes deleted unless `include_deleted=true`, admin+) |
 | GET | `/documents/{id}` | 200 metadata; 404 other-tenant/unknown; 410 content actions on deleted |
 | DELETE | `/documents/{id}` | 202 → status `deleting` (cleanup async in `013`); min role `member` (delete), `admin` (purge in `013`) |
@@ -45,7 +46,7 @@ Size error `413 {"error":{"code":"too_large"}}`; type error `415 {"code":"unsupp
 
 **Upload (happy):** stream multipart → enforce size cap while reading (DOC-REQ-003) → sniff
 signature → SHA-256 while streaming to object store → `WithTenant` tx: `INSERT document
-(status='uploaded')`; on dedup conflict return existing row (no job); else `queue.Enqueue
+(status='queued') ON CONFLICT … DO NOTHING`; on dedup conflict return existing row (no job, new object deleted); else `queue.Enqueue
 ("ingest", {document_id})` **inside the same tx** → commit → 202.
 
 **Failure path:** tx error → rollback → best-effort `DeleteObject(object_key)` → 500 (client

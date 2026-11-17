@@ -1,7 +1,7 @@
 # 004 — Job Queue (PostgreSQL): Requirements
 
 - **Spec ID:** 004 `JOB`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 2 — Async ingestion
 - **Depends on:** `specs/001-tenancy-identity`
 - **Shared context:** `docs/system-design.md §4` (jobs and messaging)

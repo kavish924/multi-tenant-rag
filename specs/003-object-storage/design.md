@@ -20,7 +20,7 @@ worker fetch path. **Out:** upload validation (`002`), cleanup jobs (`013`).
 ```go
 type ObjectStore interface {
     Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
-    Get(ctx context.Context, key string) (io.ReadSeekCloser, error)
+    Get(ctx context.Context, key string) (io.ReadCloser, error) // GCS readers are not seekable
     Delete(ctx context.Context, key string) error // idempotent
     Presign(ctx context.Context, key string, ttl time.Duration) (string, error)
 }
@@ -30,6 +30,8 @@ func DocumentKey(tenantID, documentID uuid.UUID) string {
 }
 ```
 
+- Filesystem impl (`objectstore.NewFS`, `OBJECT_STORE=fs`) for local development and tests:
+  validated keys only, atomic temp-file-then-rename writes, no signed URLs (`?redirect=true` → 501).
 - Cloud Storage impl via `cloud.google.com/go/storage` (service-account auth; `Presign` →
   `SignedURL` with `SigningSchemeV4`, signed through IAM `signBlob` so no key file exists).
   Tests run it against `fake-gcs-server` via `STORAGE_EMULATOR_HOST` (compose service `gcs` on

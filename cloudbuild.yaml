@@ -24,7 +24,7 @@ options:
 
 steps:
   - id: modules
-    name: golang:1.25
+    name: golang:1.27
     entrypoint: bash
     args:
       - -c
@@ -35,7 +35,7 @@ steps:
         go mod tidy -diff
 
   - id: vet
-    name: golang:1.25
+    name: golang:1.27
     waitFor: [modules]
     args: [go, vet, -tags, integration, ./...]
 
@@ -45,7 +45,7 @@ steps:
     args: [golangci-lint, run, --build-tags, integration, ./...]
 
   - id: unit
-    name: golang:1.25
+    name: golang:1.27
     waitFor: [modules]
     args: [go, test, -race, -count=1, ./...]
 
@@ -67,7 +67,7 @@ steps:
         exit 1
 
   - id: integration
-    name: golang:1.25
+    name: golang:1.27
     waitFor: [modules, postgres]
     env:
       - TEST_DATABASE_URL=postgres://postgres:postgres@pg:5432/postgres?sslmode=disable

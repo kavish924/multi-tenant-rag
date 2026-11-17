@@ -93,7 +93,7 @@ Instead, expose each one as a narrow **system function**:
 
 | Function | Caller | Returns |
 | -------- | ------ | ------- |
-| `claim_job(worker_id, lease)` | `cmd/worker` | one claimed job (see §4) |
+| `claim_job(worker_id, lease, kinds)` | `cmd/worker` | one claimed job of the given kinds (see §4) |
 | `memberships_for_user(user_id)` | `cmd/api` auth middleware | `(tenant_id, role)` rows |
 | `outbox_next(limit)` / `outbox_mark_published(id)` | `cmd/outbox-relay` | unpublished rows / ack |
 | `sweep_candidates(limit)` | worker sweeper | `(tenant_id, document_id)` past retention |
@@ -208,11 +208,12 @@ claim jobs with a **lease** so abandoned work is recovered automatically.
 ### Claiming a job
 
 The claim searches across every tenant, so it runs as a system function (§1) rather than a
-plain query under RLS. The worker calls `SELECT * FROM claim_job($1, interval '60 seconds')`.
+plain query under RLS. The worker calls `SELECT * FROM claim_job($1, interval '60 seconds', $2)`,
+where `$2` is the list of job kinds it has handlers for, so a worker never claims work it cannot do.
 
 ```sql
--- migrations/0004_claim_job.sql  (owned by app_system; EXECUTE granted to app)
-CREATE FUNCTION claim_job(p_worker text, p_lease interval)
+-- migrations/0004_jobs.sql  (owned by app_system; EXECUTE granted to app)
+CREATE FUNCTION claim_job(p_worker text, p_lease interval, p_kinds text[])
 RETURNS TABLE (id uuid, tenant_id uuid, kind text, payload jsonb,
                attempts int, max_attempts int)
 LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
@@ -231,9 +232,10 @@ LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $
       lease_expires_at = now() + p_lease, attempts = j.attempts + 1
   WHERE j.id = (
     SELECT c.id FROM jobs c
-    WHERE (c.status = 'queued'  AND c.run_at <= now())
-       OR (c.status = 'running' AND c.lease_expires_at < now()
-           AND c.attempts < c.max_attempts)
+    WHERE c.kind = ANY (p_kinds)
+      AND ((c.status = 'queued'  AND c.run_at <= now())
+        OR (c.status = 'running' AND c.lease_expires_at < now()
+            AND c.attempts < c.max_attempts))
     ORDER BY c.run_at
     FOR UPDATE SKIP LOCKED
     LIMIT 1

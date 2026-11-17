@@ -23,7 +23,7 @@
 
 ## Group 4: Worker tenancy context
 
-- [ ] 4.1 *(blocked on 004 worker loop)* Worker `Process` wraps all pipeline DB work in `WithTenant(job.TenantID, ...)`. (TEN-REQ-009)
+- [x] 4.1 *(`jobs.Runner` hands handlers a `TenantTx` bound to `job.TenantID`)* Worker `Process` wraps all pipeline DB work in `WithTenant(job.TenantID, ...)`. (TEN-REQ-009)
 
 ## Group 5: Tests and verification
 

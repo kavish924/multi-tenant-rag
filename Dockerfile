@@ -1,7 +1,7 @@
 # One Dockerfile for every binary:  docker build --build-arg BIN=api -t api .
 # BIN is one of: api, worker, outbox-relay, migrate.
 
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.27
 
 FROM golang:${GO_VERSION} AS build
 ARG BIN

@@ -20,14 +20,20 @@ import (
 
 	"github.com/kavish924/multi-tenant-rag/internal/api"
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
+	"github.com/kavish924/multi-tenant-rag/internal/documents"
+	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 	"github.com/kavish924/multi-tenant-rag/internal/testutil/pgtest"
 )
 
 var (
-	env *pgtest.Env
-	srv *httptest.Server
+	env     *pgtest.Env
+	srv     *httptest.Server
+	objects *objectstore.FS
 )
+
+// maxUpload is small so the size-limit test stays fast.
+const maxUpload = 1 << 20
 
 func TestMain(m *testing.M) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -43,17 +49,27 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	objDir, err := os.MkdirTemp("", "objects-*")
+	if err != nil {
+		log.Fatal(err)
+	}
+	objects, err = objectstore.NewFS(objDir)
+	if err != nil {
+		log.Fatal(err)
+	}
 	srv = httptest.NewServer(api.New(api.Deps{
-		Users:   users,
-		Tokens:  tokens,
-		Tenants: tenants.NewService(env.Store),
-		Ready:   env.Store.Ping,
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Users:     users,
+		Tokens:    tokens,
+		Tenants:   tenants.NewService(env.Store),
+		Documents: documents.NewService(env.Store, objects, maxUpload),
+		Ready:     env.Store.Ping,
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))
 
 	code := m.Run()
 	srv.Close()
 	env.Close()
+	_ = os.RemoveAll(objDir)
 	os.Exit(code)
 }
 
