@@ -2,7 +2,7 @@
 
 ## Group 1: Plumbing
 
-- [ ] 1.1 `internal/observability.Setup` for api/worker; OTLP exporter; collector sidecar on Cloud Run (Cloud Trace + Managed Prometheus exporters); compose `otel-collector` on the workstation. (OBS-REQ-001)
+- [ ] 1.1 `internal/observability.Setup` for api/worker; OTLP exporter; collector sidecar on Cloud Run (Cloud Trace + Managed Prometheus exporters); compose `otel-collector` in Cloud Shell. (OBS-REQ-001)
 - [ ] 1.2 Request middleware: request id + root span + `X-Request-Id` echo. (OBS-REQ-001, OBS-AC-001)
 - [ ] 1.3 Trace context injection into job payloads; worker parent extraction. (OBS-REQ-003, OBS-AC-002)
 

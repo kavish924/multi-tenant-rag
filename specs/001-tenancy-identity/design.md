@@ -86,10 +86,13 @@ user of the migration job's service account. No database passwords exist.
 | POST | `/auth/login` | — | — | Issue JWT |
 | GET | `/me` | JWT | member | User + membership list |
 | POST | `/tenants` | JWT | member | Create tenant (creator becomes owner) |
-| GET | `/tenants/{id}/members` | JWT | admin | List members |
-| POST | `/tenants/{id}/members` | JWT | admin | Add member (email, role) |
-| PATCH | `/tenants/{id}/members/{uid}` | JWT | owner | Change role |
-| DELETE | `/tenants/{id}/members/{uid}` | JWT | owner | Remove member (owner cannot be removed if last) |
+| GET | `/tenants/{tenant}/members` | JWT | admin | List members |
+| POST | `/tenants/{tenant}/members` | JWT | admin | Add member (email, role) |
+| PATCH | `/tenants/{tenant}/members/{uid}` | JWT | owner | Change role |
+| DELETE | `/tenants/{tenant}/members/{uid}` | JWT | owner | Remove member (owner cannot be removed if last) |
+
+Only a path segment named `{tenant}` selects the tenant; other ids in a path (for example
+`/documents/{id}`) never do.
 
 Errors: `401` unauthenticated/expired, `403` insufficient role, `404` non-member tenant
 (existence hidden), JSON error envelope `{"error": {"code", "message"}}`.

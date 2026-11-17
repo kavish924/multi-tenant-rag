@@ -24,6 +24,7 @@ import (
 // claim_job (004), outbox_next / outbox_mark_published (006) and
 // sweep_candidates (013) in the same migration review that adds them.
 var systemFunctions = []string{
+	"claim_job(text,interval,text[])",
 	"memberships_for_user(uuid)",
 }
 
@@ -307,9 +308,9 @@ func TestMembershipsForUser(t *testing.T) {
 	ctx := context.Background()
 
 	cases := map[uuid.UUID][]uuid.UUID{
-		f.userA:     {f.tenantA},
-		f.userB:     {f.tenantB},
-		f.shared:    {f.tenantA, f.tenantB},
+		f.userA:    {f.tenantA},
+		f.userB:    {f.tenantB},
+		f.shared:   {f.tenantA, f.tenantB},
 		uuid.New(): nil,
 	}
 	for u, want := range cases {

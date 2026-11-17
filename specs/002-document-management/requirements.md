@@ -1,7 +1,7 @@
 # 002 — Document Management: Requirements
 
 - **Spec ID:** 002 `DOC`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 1 — Working Go API
 - **Depends on:** `specs/001-tenancy-identity`
 - **Shared context:** `docs/system-design.md §2, §3` (data model, ingestion state machine)
@@ -27,7 +27,7 @@ created in a single transaction (queue mechanics in `004`).
 - **DOC-REQ-002:** Type is validated by content signature (magic bytes) in addition to the declared MIME type.
 - **DOC-REQ-003:** Maximum upload size is configurable (default 50 MB); enforced before reading the full body into memory.
 - **DOC-REQ-004:** SHA-256 is computed while streaming; a partial unique index `(tenant_id, sha256) WHERE deleted_at IS NULL` makes live duplicates per tenant impossible while allowing a deleted file to be re-uploaded.
-- **DOC-REQ-005:** Upload stores the object (via `003`), then in **one transaction** inserts the document row (status `uploaded`) and enqueues an ingestion job (status `queued`).
+- **DOC-REQ-005:** Upload stores the object (via `003`), then in **one transaction** inserts the document row and enqueues its ingestion job; because both commit together the row is written directly as `queued` (`uploaded` is reserved for a stored object without a job).
 - **DOC-REQ-006:** If any part of the transaction fails, neither the document row nor the job persists; the stored object is deleted (best-effort compensating action).
 - **DOC-REQ-007:** `GET /documents` lists tenant documents with pagination; `GET /documents/{id}` returns metadata incl. status and error reason.
 - **DOC-REQ-008:** `DELETE /documents/{id}` performs authorization + soft delete (sets `deleted_at`, status `deleting`); physical cleanup is spec `013`.

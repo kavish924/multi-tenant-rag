@@ -3,4 +3,3 @@ env          = "dev"
 region       = "us-central1"
 github_owner = "your-github-user"
 github_repo  = "multi-tenant-rag"
-developers   = ["user:you@example.com"]

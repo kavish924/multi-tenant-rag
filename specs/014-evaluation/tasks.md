@@ -6,7 +6,7 @@
 
 ## Group 2: Harness
 
-- [ ] 2.1 `cmd/eval run`: compose profile boot (workstation) or test-project target (Cloud Build), corpus ingest, case execution. (EVA-REQ-002, EVA-AC-001)
+- [ ] 2.1 `cmd/eval run`: compose profile boot (Cloud Shell) or test-project target (Cloud Build), corpus ingest, case execution. (EVA-REQ-002, EVA-AC-001)
 - [ ] 2.2 Deterministic metrics: recall@8, MRR, nDCG@10 (+ unit tests on hand-computed vectors). (EVA-REQ-003)
 - [ ] 2.3 Answer judging: batched LLM judge with rubric + manual spot-check protocol doc. (EVA-REQ-004)
 - [ ] 2.4 Citation validity (deterministic resolution + judge-supported sentence check). (EVA-REQ-005, EVA-AC-004)

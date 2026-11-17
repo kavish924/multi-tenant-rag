@@ -211,7 +211,7 @@ One GCP project per environment (dev / test / prod). Details: [gcp-environment.m
 
 ```mermaid
 flowchart TB
-    DEV["Cloud Workstations<br/>code · go test · testcontainers"] -->|git push| CB["Cloud Build<br/>test · build · migrate · deploy"]
+    DEV["Cloud Shell<br/>code · go test · testcontainers"] -->|git push| CB["Cloud Build<br/>test · build · migrate · deploy"]
     CB --> AR["Artifact Registry<br/>images by digest"]
 
     subgraph project["GCP project (per environment)"]

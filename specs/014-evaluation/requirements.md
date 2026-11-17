@@ -23,7 +23,7 @@ correctness), citation validity, and refusal behavior — with thresholds that g
 ### Functional
 
 - **EVA-REQ-001:** `tests/evaluation/golden.jsonl`: `{"tenant", "question", "relevant_chunks": [ids], "refusal": bool, "reference_answer": str?}` — ≥ 50 cases across ≥ 2 tenants, incl. lexical-only, semantic-only, multi-hop, and out-of-scope questions.
-- **EVA-REQ-002:** Harness (`cmd/eval` + `make eval`): boots the stack (compose profile on the workstation, or the **test** project in Cloud Build), ingests fixture corpus, runs each case, computes metrics.
+- **EVA-REQ-002:** Harness (`cmd/eval` + `make eval`): boots the stack (compose profile in Cloud Shell, or the **test** project in Cloud Build), ingests fixture corpus, runs each case, computes metrics.
 - **EVA-REQ-003:** Retrieval metrics: recall@k (k=8), MRR, nDCG@10 vs labelled chunks.
 - **EVA-REQ-004:** Answer metrics: faithfulness to retrieved context + correctness vs reference — LLM-as-judge with structured rubric; **manual spot-check protocol documented** (sample of judged outputs reviewed by a human each run).
 - **EVA-REQ-005:** Citation metric: every emitted marker resolves to a real, authorized chunk that supports the sentence (sentence-support check is judge-assisted, resolution check is deterministic).

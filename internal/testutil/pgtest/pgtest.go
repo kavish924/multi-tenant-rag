@@ -126,11 +126,22 @@ func (e *Env) Close() {
 	}
 }
 
-// Truncate empties every application table between tests.
+// Truncate empties every application table (all of public except the
+// migration bookkeeping table) between tests.
 func (e *Env) Truncate(t testing.TB) {
 	t.Helper()
-	if _, err := e.Admin.Exec(context.Background(),
-		`TRUNCATE memberships, tenants, users CASCADE`); err != nil {
+	ctx := context.Background()
+	rows, err := e.Admin.Query(ctx, `
+		SELECT quote_ident(tablename) FROM pg_tables
+		WHERE schemaname = 'public' AND tablename <> 'goose_db_version'`)
+	if err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	if _, err := e.Admin.Exec(ctx, "TRUNCATE "+strings.Join(tables, ", ")+" CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }

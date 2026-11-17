@@ -1,7 +1,7 @@
 # 005 — Ingestion Pipeline: Requirements
 
 - **Spec ID:** 005 `ING`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 2 — Async ingestion
 - **Depends on:** `specs/002-document-management`, `003-object-storage`, `004-job-queue`
 - **Shared context:** `docs/system-design.md §3` (ingestion pipeline state machine)

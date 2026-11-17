@@ -22,7 +22,7 @@ enforcement, OTel collector sidecar config, Cloud Monitoring dashboards (Terrafo
   as parent (links if spans get too deep).
 - `deployments/`: otel-collector sidecar config (OTLP gRPC in; `googlecloud` exporter for
   traces, `googlemanagedprometheus` exporter for metrics); Cloud Monitoring dashboard JSON under
-  `deployments/terraform/dashboards/`. On the workstation the compose collector uses a console
+  `deployments/terraform/dashboards/`. In Cloud Shell the compose collector uses a console
   exporter.
 - Logs: slog JSON on stdout with `logging.googleapis.com/trace` and `spanId` fields so Cloud
   Logging links each line to its trace.

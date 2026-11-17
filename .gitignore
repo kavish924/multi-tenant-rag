@@ -58,3 +58,6 @@ Thumbs.db
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+
+# Local object store (OBJECT_STORE=fs)
+.data/

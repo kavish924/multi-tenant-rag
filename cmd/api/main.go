@@ -14,7 +14,9 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/api"
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/config"
+	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
+	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
 
@@ -46,17 +48,23 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	objects, err := objectstore.NewFS(cfg.Objects.Dir)
+	if err != nil {
+		return err
+	}
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.New(api.Deps{
-			Users:   users,
-			Tokens:  tokens,
-			Tenants: tenants.NewService(store),
-			Ready:   store.Ping,
-			Log:     log,
+			Users:     users,
+			Tokens:    tokens,
+			Tenants:   tenants.NewService(store),
+			Documents: documents.NewService(store, objects, cfg.MaxUploadBytes),
+			Ready:     store.Ping,
+			Log:       log,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
+		ReadTimeout:       5 * time.Minute, // 50 MB uploads on slow links
 		IdleTimeout:       120 * time.Second,
 	}
 

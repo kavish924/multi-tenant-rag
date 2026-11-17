@@ -25,7 +25,7 @@ workload justifies it.
 | LLM & embeddings | Your own provider interfaces; Vertex AI implementations | Swap models without touching retrieval; service-account auth, no keys. |
 | Runtime          | Cloud Run (service for `api`, worker pools for `worker`/`outbox-relay`, job for migrations) | Containers without cluster ops. |
 | Telemetry        | OpenTelemetry → Cloud Trace, Managed Service for Prometheus, Cloud Monitoring | Vendor-neutral instrumentation, managed backends. |
-| Dev & CI         | Cloud Workstations, Cloud Build, Artifact Registry, Terraform | Nothing installed on the laptop ([gcp-environment.md](gcp-environment.md)). |
+| Dev & CI         | Cloud Shell, Cloud Build, Artifact Registry, Terraform | Nothing installed on the laptop ([gcp-environment.md](gcp-environment.md)). |
 
 ## Language and runtime
 
@@ -110,10 +110,10 @@ on each signal.
 
 ## Development environment
 
-Nothing is installed on the laptop. Development happens in **Cloud Workstations**; tests run
+Nothing is installed on the laptop. Development happens in **Cloud Shell**; tests run
 there and in **Cloud Build**. Full setup: [gcp-environment.md](gcp-environment.md).
 
-Inside the workstation, `deployments/compose.yaml` provides a disposable test stack:
+In Cloud Shell, `deployments/compose.yaml` provides a disposable test stack:
 
 | Service          | Image                     | Stands in for          |
 | ---------------- | ------------------------- | ---------------------- |
@@ -121,7 +121,7 @@ Inside the workstation, `deployments/compose.yaml` provides a disposable test st
 | `gcs`            | `fsouza/fake-gcs-server`  | Cloud Storage          |
 | `otel-collector` | `otel/opentelemetry-collector` | Collector sidecar (console exporter) |
 
-The binaries themselves run with `go run` on the workstation, or deployed to the dev project.
+The binaries themselves run with `go run` in Cloud Shell, or deployed to the dev project.
 
 ## What we deliberately do NOT run early
 
@@ -136,7 +136,7 @@ Each of these can be introduced later without re-architecting, because the bound
 
 ## Related docs
 
-- [GCP Environment](gcp-environment.md) — workstations, CI/CD, Cloud Run, Cloud SQL roles, costs
+- [GCP Environment](gcp-environment.md) — Cloud Shell, CI/CD, Cloud Run, Cloud SQL roles, free-trial costs
 - [Architecture Diagrams](diagrams/architecture.md) — visual reference: context, containers, sequence paths, state machines, deployment, trust boundaries
 - [System Architecture](system-architecture.md) — binaries, paths, deployment view
 - [System Design](system-design.md) — data model, tenancy, pipeline, retrieval, guardrails

@@ -28,10 +28,10 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | Spec | Feature | Milestone | Status |
 | ---- | ------- | --------- | ------ |
 | [001](./001-tenancy-identity/) | Tenancy & identity | 1 — Working Go API | In progress |
-| [002](./002-document-management/) | Document management | 1 — Working Go API | Draft |
-| [003](./003-object-storage/) | Object storage | 2 — Async ingestion | Draft |
-| [004](./004-job-queue/) | Job queue (PostgreSQL) | 2 — Async ingestion | Draft |
-| [005](./005-ingestion-pipeline/) | Ingestion pipeline | 2 — Async ingestion | Draft |
+| [002](./002-document-management/) | Document management | 1 — Working Go API | In progress |
+| [003](./003-object-storage/) | Object storage | 2 — Async ingestion | In progress |
+| [004](./004-job-queue/) | Job queue (PostgreSQL) | 2 — Async ingestion | In progress |
+| [005](./005-ingestion-pipeline/) | Ingestion pipeline | 2 — Async ingestion | In progress |
 | [006](./006-outbox-messaging/) | Outbox messaging | 2 — Async ingestion | Draft |
 | [007](./007-hybrid-retrieval/) | Hybrid retrieval (RRF) | 3 — RAG end to end | Draft |
 | [008](./008-generation-citations/) | Generation, streaming & citations | 3 — RAG end to end | Draft |
@@ -51,7 +51,7 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | 2 — Async ingestion | Restarting a worker does not corrupt document state. |
 | 3 — RAG end to end | A test dataset demonstrates measurable retrieval and answer quality. |
 | 4 — Observable production | You can explain the latency and failure of a request using its telemetry. |
-| 5 — Release-quality capstone | Another developer can run the project using the documented setup — a Cloud Workstation plus the bootstrap sequence in `docs/gcp-environment.md §11`, with no local installs. |
+| 5 — Release-quality capstone | Another developer can run the project using the documented setup — Cloud Shell plus the bootstrap sequence in `docs/gcp-environment.md §11`, with no local installs. |
 
 ## Requirement ID prefixes
 
