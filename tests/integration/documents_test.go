@@ -237,6 +237,12 @@ func TestSoftDelete(t *testing.T) {
 	if n := count(t, `SELECT count(*) FROM jobs WHERE kind = 'cleanup' AND payload->>'document_id' = $1`, id); n != 1 {
 		t.Errorf("cleanup jobs = %d, want 1", n)
 	}
+	// OBX-REQ-002: one created and one deleting event, despite the repeat delete.
+	for topic, want := range map[string]int{"document.created": 1, "document.deleting": 1} {
+		if n := count(t, `SELECT count(*) FROM outbox WHERE topic = $1 AND payload->>'document_id' = $2`, topic, id); n != want {
+			t.Errorf("%s events = %d, want %d", topic, n, want)
+		}
+	}
 
 	r = call(t, "GET", "/documents/"+id, member, nil)
 	expect(t, r, http.StatusOK, "metadata after delete")

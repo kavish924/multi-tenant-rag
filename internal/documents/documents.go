@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/kavish924/multi-tenant-rag/internal/jobs"
+	"github.com/kavish924/multi-tenant-rag/internal/messaging"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 )
@@ -116,7 +117,8 @@ type UploadResult struct {
 }
 
 // Upload validates, streams to object storage while hashing, then inserts
-// the document row and its ingest job in one transaction (DOC-REQ-005).
+// the document row, its ingest job and the document.created event in one
+// transaction (DOC-REQ-005, OBX-REQ-002).
 // Nothing persists if any step fails; the stored object is deleted
 // (DOC-REQ-006).
 func (s *Service) Upload(ctx context.Context, in UploadInput) (UploadResult, error) {
@@ -188,6 +190,11 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (UploadResult, err
 			Kind:           JobIngest,
 			Payload:        map[string]string{"document_id": doc.ID.String()},
 			IdempotencyKey: JobIngest + ":" + doc.ID.String(),
+		}); err != nil {
+			return err
+		}
+		if _, err := messaging.Emit(ctx, tx, doc.TenantID, messaging.DocumentCreated{
+			DocumentID: created.ID, ContentType: created.ContentType, SizeBytes: created.SizeBytes,
 		}); err != nil {
 			return err
 		}
@@ -297,8 +304,8 @@ func (s *Service) List(ctx context.Context, tenantID uuid.UUID, p ListParams) ([
 	return out, next, nil
 }
 
-// Delete soft-deletes a document and enqueues its cleanup job in one
-// transaction (DOC-REQ-008). The UPDATE takes the row lock that serializes
+// Delete soft-deletes a document, enqueues its cleanup job and emits
+// document.deleting in one transaction (DOC-REQ-008, OBX-REQ-002). The UPDATE takes the row lock that serializes
 // with the ingestion Index transaction (005). Deleting an already deleted
 // document is a no-op that returns it.
 func (s *Service) Delete(ctx context.Context, tenantID, id uuid.UUID) (Document, error) {
@@ -316,12 +323,15 @@ func (s *Service) Delete(ctx context.Context, tenantID, id uuid.UUID) (Document,
 		if err != nil {
 			return err
 		}
-		_, _, err = jobs.Enqueue(ctx, tx, jobs.EnqueueParams{
+		if _, _, err := jobs.Enqueue(ctx, tx, jobs.EnqueueParams{
 			TenantID:       tenantID,
 			Kind:           JobCleanup,
 			Payload:        map[string]string{"document_id": id.String()},
 			IdempotencyKey: JobCleanup + ":" + id.String(),
-		})
+		}); err != nil {
+			return err
+		}
+		_, err = messaging.Emit(ctx, tx, tenantID, messaging.DocumentDeleting{DocumentID: id})
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -95,7 +95,7 @@ Instead, expose each one as a narrow **system function**:
 | -------- | ------ | ------- |
 | `claim_job(worker_id, lease, kinds)` | `cmd/worker` | one claimed job of the given kinds (see §4) |
 | `memberships_for_user(user_id)` | `cmd/api` auth middleware | `(tenant_id, role)` rows |
-| `outbox_next(limit)` / `outbox_mark_published(id)` | `cmd/outbox-relay` | unpublished rows / ack |
+| `outbox_next(limit)` / `outbox_mark_published(id)` / `outbox_mark_failed(id, error, max)` | `cmd/outbox-relay` | unpublished rows / ack / poison-row count |
 | `sweep_candidates(limit)` | worker sweeper | `(tenant_id, document_id)` past retention |
 
 The set of system functions is small and closed; adding one is a reviewed migration, and the
@@ -138,7 +138,7 @@ Vertex AI embedding model's output size (HNSW: `vector` ≤ 2,000 dims, `halfvec
 `embed_model` recorded for future re-embedding. |
 | Indexes     | `hnsw (embedding vector_cosine_ops)` for ANN, `gin (tsv)` for full text, `(tenant_id, document_id)` for scoped access. |
 | `jobs`      | `UNIQUE (tenant_id, idempotency_key)`; lease columns (`lease_expires_at`, `locked_by`) for crash recovery; `attempts` / `max_attempts` for bounded retries. |
-| `outbox`    | `published_at` nullable; relay marks rows published.                                                        |
+| `outbox`    | `published_at` nullable; relay marks rows published. `attempts` / `quarantined_at` for poison rows. `consumed_events (consumer, event_id)` dedupes consumers. |
 
 ### Filtered vector search caveat
 

@@ -119,4 +119,5 @@ Chunks carry `tenant_id` from the document; all writes via `WithTenant` (RLS bac
 - Embedding model → **decided:** 768 dimensions (`llm.EmbeddingDim`, `vector(768)`), which fits
   Vertex `text-embedding-005` natively or `gemini-embedding-001` with `output_dimensionality = 768`.
   The Vertex provider lands with the GCP work; until then the worker uses `llm.Fake`.
-- Outbox events (4.3) → wired when `006` adds the `outbox` table.
+- Outbox events (4.3) → **done:** `document.indexed` in the Index transaction; `document.failed`
+  in the final failure write.

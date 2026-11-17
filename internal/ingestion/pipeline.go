@@ -1,5 +1,6 @@
 // Package ingestion runs the ingest job: Extract → Chunk → Embed → Index
-// (spec 005). Every stage is idempotent, so a crash and retry converges to
+// (spec 005). The Index transaction emits document.indexed and a final
+// failure emits document.failed (spec 006). Every stage is idempotent, so a crash and retry converges to
 // the same rows; deletion is respected at every status write and, decisively,
 // by the row lock taken in the Index transaction.
 package ingestion
@@ -21,6 +22,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/embed"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/extract"
 	"github.com/kavish924/multi-tenant-rag/internal/jobs"
+	"github.com/kavish924/multi-tenant-rag/internal/messaging"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 )
 
@@ -102,7 +104,10 @@ func (p *Pipeline) Handle(ctx context.Context, job jobs.Job, tx jobs.TenantTx) e
 		if !errors.As(err, &se) {
 			se = &stageError{reason: ReasonInternal, err: err}
 		}
-		p.markFailed(ctx, tx, docID, se)
+		// document.failed is emitted only when ingestion gives up: a permanent
+		// failure or the job's last attempt (ING-AC-008).
+		final := se.permanent || job.Attempts >= job.MaxAttempts
+		p.markFailed(ctx, tx, job.TenantID, docID, se, final)
 		log.Warn("ingest failed", "reason", se.reason, "permanent", se.permanent, "err", se.err)
 		if se.permanent {
 			return jobs.Permanent(err)
@@ -245,25 +250,36 @@ func (p *Pipeline) index(ctx context.Context, tx jobs.TenantTx, tenantID, docID 
 		if _, err := t.Exec(ctx, `DELETE FROM chunks WHERE document_id = $1 AND ordinal >= $2`, docID, len(chunks)); err != nil {
 			return err
 		}
-		_, err := t.Exec(ctx, `
+		if _, err := t.Exec(ctx, `
 			UPDATE documents SET status = 'indexed', error = NULL
-			WHERE id = $1 AND deleted_at IS NULL`, docID)
+			WHERE id = $1 AND deleted_at IS NULL`, docID); err != nil {
+			return err
+		}
+		_, err := messaging.Emit(ctx, t, tenantID, messaging.DocumentIndexed{
+			DocumentID: docID, Chunks: len(chunks), EmbedModel: model,
+		})
 		return err
 	})
 	return cancelled, err
 }
 
-// markFailed records the reason, never overwriting a deletion (ING-REQ-010).
-// It is best effort: the job's own failure handling still applies.
-func (p *Pipeline) markFailed(ctx context.Context, tx jobs.TenantTx, id uuid.UUID, se *stageError) {
+// markFailed records the reason, never overwriting a deletion (ING-REQ-010),
+// and with final set emits document.failed in the same transaction. It is
+// best effort: the job's own failure handling still applies.
+func (p *Pipeline) markFailed(ctx context.Context, tx jobs.TenantTx, tenantID, id uuid.UUID, se *stageError, final bool) {
 	msg := se.reason + ": " + se.err.Error()
 	if len(msg) > 500 {
 		msg = msg[:500]
 	}
-	err := tx(context.WithoutCancel(ctx), func(t pgx.Tx) error {
-		_, err := t.Exec(ctx, `
+	ctx = context.WithoutCancel(ctx) // record the failure even when the job is being cancelled
+	err := tx(ctx, func(t pgx.Tx) error {
+		tag, err := t.Exec(ctx, `
 			UPDATE documents SET status = 'failed', error = $2
 			WHERE id = $1 AND deleted_at IS NULL`, id, msg)
+		if err != nil || !final || tag.RowsAffected() == 0 {
+			return err // a deleted document gets no failure event
+		}
+		_, err = messaging.Emit(ctx, t, tenantID, messaging.DocumentFailed{DocumentID: id, Reason: se.reason})
 		return err
 	})
 	if err != nil {
