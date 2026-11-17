@@ -1,7 +1,7 @@
 # 013 — Deletion & Cleanup: Requirements
 
 - **Spec ID:** 013 `DEL`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 5 — Release-quality capstone
 - **Depends on:** `specs/002`, `004`, `005`, `006`
 - **Shared context:** `docs/system-design.md §3` (deletion note), `§9` (accidental deletion)

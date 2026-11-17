@@ -59,3 +59,17 @@ func ParseDocumentKey(key string) (tenantID, documentID uuid.UUID, err error) {
 	}
 	return t, d, nil
 }
+
+// ObjectInfo describes a stored object.
+type ObjectInfo struct {
+	Key      string
+	Size     int64
+	Modified time.Time
+}
+
+// Lister is implemented by stores that can enumerate document objects. The
+// retention sweeper uses it to find orphans (objects with no document row,
+// DEL-REQ-007). Only canonical document keys are reported.
+type Lister interface {
+	List(ctx context.Context, fn func(ObjectInfo) error) error
+}

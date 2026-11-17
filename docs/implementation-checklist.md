@@ -167,10 +167,10 @@ pulled forward here.
   - [x] Ask-path wiring with `windowed` / `strict` output modes; verdict metrics (Group 3)
   - [x] Semantics, stage, injection, overhead tests (Group 4)
 - [ ] **[013 Deletion & cleanup](../specs/013-deletion-cleanup/tasks.md)**
-  - [ ] `cleanup` job: explicit chunk delete + invariant + object delete → `deleted` (Group 1)
-  - [ ] Tenant purge; retention sweeper via `sweep_candidates` (Group 2)
-  - [ ] All four interleaving tests; exclusion timing (Group 3)
-  - [ ] Authz matrix, performance, red-team deletion-race pass (Group 4)
+  - [x] `cleanup` job: explicit chunk delete + invariant + object delete → `deleted` (Group 1)
+  - [x] Tenant purge; retention sweeper via `sweep_candidates` (Group 2)
+  - [ ] All four interleaving tests; exclusion timing (Group 3) *(written, not yet run)*
+  - [ ] Authz matrix, performance, red-team deletion-race pass (Group 4) *(authz and performance tests written, not yet run; red-team pass with 015)*
 - [ ] **[014 Evaluation](../specs/014-evaluation/tasks.md)** — remainder: A/B mode, judge-down mode, CI (fast set per PR, full nightly), first recorded tuning decision
 - [ ] **[015 Isolation & red team](../specs/015-isolation-redteam/tasks.md)**
   - [ ] Test project `<prefix>-test` provisioned; canary seeding; capture harness; target guard (Group 1)

@@ -113,3 +113,33 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	}
 	return c.r.Read(p)
 }
+
+// List walks the root and reports every document object (Lister). Temp
+// files of in-progress uploads and anything that is not a canonical
+// document key are skipped.
+func (s *FS) List(ctx context.Context, fn func(ObjectInfo) error) error {
+	return filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(s.root, p)
+		if err != nil {
+			return err
+		}
+		key := filepath.ToSlash(rel)
+		if _, _, err := ParseDocumentKey(key); err != nil {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		return fn(ObjectInfo{Key: key, Size: info.Size(), Modified: info.ModTime()})
+	})
+}

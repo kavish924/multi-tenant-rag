@@ -113,7 +113,12 @@ type Worker struct {
 	Objects     Objects
 	Quotas      Quotas
 	Concurrency int
-	LogLevel    string
+	// Retention (spec 013): RETENTION_DAYS (30), SWEEP_INTERVAL (1h),
+	// ORPHAN_GRACE (1h).
+	Retention     time.Duration
+	SweepInterval time.Duration
+	OrphanGrace   time.Duration
+	LogLevel      string
 }
 
 // LoadWorker reads cmd/worker configuration.
@@ -130,7 +135,25 @@ func LoadWorker() (Worker, error) {
 	if err != nil {
 		return Worker{}, err
 	}
-	w := Worker{DB: db, Objects: objs, Quotas: q, Concurrency: 4, LogLevel: env("LOG_LEVEL", "info")}
+	w := Worker{DB: db, Objects: objs, Quotas: q, Concurrency: 4, LogLevel: env("LOG_LEVEL", "info"),
+		Retention: 30 * 24 * time.Hour, SweepInterval: time.Hour, OrphanGrace: time.Hour}
+	days, err := intEnv("RETENTION_DAYS", 30, 0, 3650)
+	if err != nil {
+		return Worker{}, err
+	}
+	w.Retention = time.Duration(days) * 24 * time.Hour
+	for _, f := range []struct {
+		key string
+		dst *time.Duration
+	}{{"SWEEP_INTERVAL", &w.SweepInterval}, {"ORPHAN_GRACE", &w.OrphanGrace}} {
+		if v := os.Getenv(f.key); v != "" {
+			d, err := time.ParseDuration(v)
+			if err != nil || d < time.Minute {
+				return Worker{}, fmt.Errorf("config: %s must be a duration of at least 1m", f.key)
+			}
+			*f.dst = d
+		}
+	}
 	if v := os.Getenv("WORKER_CONCURRENCY"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > 64 {

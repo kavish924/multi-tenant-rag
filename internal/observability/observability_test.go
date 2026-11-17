@@ -97,6 +97,7 @@ func TestMetricCardinality(t *testing.T) {
 	m.Usage(ctx, tenant, "generate", "gemini-2.5-flash", 1000, 200)
 	m.GuardVerdict(ctx, tenant, "output.redact", "redact")
 	m.UncitedAnswer(ctx, tenant)
+	m.SweeperRemoved(ctx, "orphan_object", 2)
 	if err := m.RegisterQueueGauges(func(context.Context) ([]QueueStat, error) {
 		return []QueueStat{{Kind: "ingest", Depth: 3, OldestAgeS: 12}}, nil
 	}); err != nil {
@@ -109,7 +110,7 @@ func TestMetricCardinality(t *testing.T) {
 	sets := attrSets(collect(t))
 	for _, name := range []string{"http_request_duration", "jobs_attempts", "jobs_failed", "provider_errors", "rerank_fallbacks",
 		"ingest_failures", "tokens", "estimated_cost_usd", "jobs_queue_depth", "jobs_queue_age", "mistake",
-		"guard_verdicts", "uncited_answers"} {
+		"guard_verdicts", "uncited_answers", "sweeper_removed"} {
 		if len(sets[name]) == 0 {
 			t.Errorf("metric %s not collected", name)
 		}

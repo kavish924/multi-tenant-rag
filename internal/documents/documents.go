@@ -452,3 +452,26 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	c.n += int64(len(p))
 	return len(p), nil
 }
+
+// JobPurge is the tenant purge job kind (spec 013).
+const JobPurge = "purge"
+
+// RequestPurge enqueues a purge of all of the tenant's content (DEL-REQ-005)
+// and returns the job id. The purge job soft-deletes and cleans every
+// document and removes usage rows; it is idempotent, so a repeated request
+// is harmless.
+func (s *Service) RequestPurge(ctx context.Context, tenantID, requestedBy uuid.UUID) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := s.store.WithTenant(ctx, tenantID, func(tx pgx.Tx) error {
+		var err error
+		id, _, err = jobs.Enqueue(ctx, tx, jobs.EnqueueParams{
+			TenantID: tenantID, Kind: JobPurge,
+			Payload: map[string]string{"requested_by": requestedBy.String()},
+		})
+		return err
+	})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("documents: purge: %w", err)
+	}
+	return id, nil
+}

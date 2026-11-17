@@ -23,6 +23,8 @@ const (
 	TopicDocumentIndexed  = "document.indexed"
 	TopicDocumentFailed   = "document.failed"
 	TopicDocumentDeleting = "document.deleting"
+	TopicDocumentDeleted  = "document.deleted" // cleanup finished (013)
+	TopicTenantPurged     = "tenant.purged"    // purge finished (013)
 )
 
 // SchemaVersion is stamped on every published envelope. Bump it when a
@@ -63,6 +65,19 @@ func (DocumentCreated) Topic() string  { return TopicDocumentCreated }
 func (DocumentIndexed) Topic() string  { return TopicDocumentIndexed }
 func (DocumentFailed) Topic() string   { return TopicDocumentFailed }
 func (DocumentDeleting) Topic() string { return TopicDocumentDeleting }
+func (DocumentDeleted) Topic() string  { return TopicDocumentDeleted }
+func (TenantPurged) Topic() string     { return TopicTenantPurged }
+
+// DocumentDeleted is emitted when cleanup has removed a document's chunks
+// and object (spec 013).
+type DocumentDeleted struct {
+	DocumentID uuid.UUID `json:"document_id"`
+}
+
+// TenantPurged is emitted when a tenant purge finishes (spec 013).
+type TenantPurged struct {
+	Documents int `json:"documents"`
+}
 
 // Emit writes an outbox row inside tx, which must be a WithTenant
 // transaction for tenantID (forced RLS rejects any other tenant). The event

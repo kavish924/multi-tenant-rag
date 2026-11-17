@@ -72,6 +72,7 @@ func New(d Deps) http.Handler {
 		mux.Handle("GET /documents/{id}", tenantRoute(tenants.RoleMember, s.getDocument))
 		mux.Handle("DELETE /documents/{id}", tenantRoute(tenants.RoleMember, s.deleteDocument))
 		mux.Handle("GET /documents/{id}/content", tenantRoute(tenants.RoleMember, s.documentContent))
+		mux.Handle("POST /tenants/{tenant}/purge", tenantRoute(tenants.RoleOwner, s.purgeTenant))
 	}
 	if d.Retriever != nil {
 		mux.Handle("POST /search", tenantRoute(tenants.RoleMember, s.search))

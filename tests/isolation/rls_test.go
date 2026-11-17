@@ -30,6 +30,8 @@ var systemFunctions = []string{
 	"outbox_mark_failed(bigint,text,integer)",
 	"outbox_mark_published(bigint)",
 	"outbox_next(integer)",
+	"sweep_candidates(interval,integer)",
+	"sweep_delete_document(uuid,interval)",
 }
 
 // globalTables are the only application tables allowed without forced RLS.

@@ -64,6 +64,7 @@ type Metrics struct {
 	ingestFailures metric.Int64Counter
 	guardVerdicts  metric.Int64Counter
 	uncited        metric.Int64Counter
+	sweeper        metric.Int64Counter
 }
 
 // NewMetrics creates the instruments on mp.
@@ -80,6 +81,7 @@ func NewMetrics(mp metric.MeterProvider) *Metrics {
 	m.ingestFailures, _ = m.meter.Int64Counter("ingest_failures", metric.WithDescription("Ingestion failures by reason code (parser failure reasons)."))
 	m.guardVerdicts, _ = m.meter.Int64Counter("guard_verdicts", metric.WithDescription("Guard Block/Redact verdicts by stage (spec 012)."))
 	m.uncited, _ = m.meter.Int64Counter("uncited_answers", metric.WithDescription("Answers with sources but no citation (soft signal, spec 012)."))
+	m.sweeper, _ = m.meter.Int64Counter("sweeper_removed", metric.WithDescription("Rows and objects removed by the retention sweeper, by kind (spec 013)."))
 	return m
 }
 
@@ -139,6 +141,11 @@ func (m *Metrics) GuardVerdict(ctx context.Context, tenantID uuid.UUID, stage, v
 // UncitedAnswer counts an answer that cited nothing although sources existed.
 func (m *Metrics) UncitedAnswer(ctx context.Context, tenantID uuid.UUID) {
 	m.uncited.Add(ctx, 1, metric.WithAttributes(attribute.String("tenant_id", tenantID.String())))
+}
+
+// SweeperRemoved reports one sweep's removals (DEL-AC-008).
+func (m *Metrics) SweeperRemoved(ctx context.Context, kind string, n int) {
+	m.sweeper.Add(ctx, int64(n), metric.WithAttributes(attribute.String("kind", kind)))
 }
 
 // Usage feeds tokens_total and estimated_cost_usd_total from one usage row.

@@ -78,3 +78,33 @@ never reappear in search or citations (red-team "deletion races" pass condition)
 
 - Cache layer shape (answer cache exists only if `009+` add it) → **default:** cache purge is a
   no-op interface today; concretized when caching lands (any cache key MUST include tenant).
+
+## 11. As built
+
+- `internal/ingestion/cleanup.Cleaner` (job kind `cleanup`, key `cleanup:{document_id}`):
+  load (a missing row means already swept; a live document is a permanent failure) → delete
+  chunks in batches of 1,000, each in its own short transaction → `CachePurger` (no-op
+  `NoCache` today) → `ObjectStore.Delete(DocumentKey(tenant, doc))` (key never read from the row)
+  → under the row lock: assert zero chunks (else retry + `ALERT` log), set `deleted`, emit
+  `document.deleted`. Every step is idempotent, so the job retry ladder covers partial failures.
+- `cleanup.Purger` (job kind `purge`): soft-deletes every live document exactly like a user
+  delete (event + cleanup job), then cleans every `deleting` document inline, so a finished
+  purge means no chunks and no objects; then deletes `usage_events` and
+  `tenant_usage_counters` and emits `tenant.purged`. A failed document fails the job and the
+  retry resumes. Tenant row, users and memberships are **retained** (anonymization is out of
+  scope). `POST /tenants/{tenant}/purge`: owner only, requires `X-Confirm-Purge: <tenant id>`,
+  returns 202 `{job_id}`. Document delete stays member+ (spec 002).
+- `cleanup.DeletingConsumer`: the idempotent-consumer reference (DEL-REQ-006) — on
+  `document.deleting` it records the event in `consumed_events` and ensures the cleanup job in
+  the same tenant transaction. It is a `messaging.Publisher`; production enqueues cleanup in the
+  delete transaction itself, so it is a safety net.
+- `cleanup.Sweeper` (in `cmd/worker`, one active via an advisory lock, every `SWEEP_INTERVAL`
+  = 1h): hard-deletes `deleted` rows past `RETENTION_DAYS` (30) through two new system
+  functions, `sweep_candidates(retention, limit)` and `sweep_delete_document(id, retention)`
+  — the app role still has no `DELETE` on `documents`, and the function only removes cleaned,
+  expired rows. Orphans: stores implementing `objectstore.Lister` (the fs store; GCS with the
+  GCP work) are listed; objects older than `ORPHAN_GRACE` (1h, protecting in-flight uploads)
+  with no document row in their own tenant are deleted. `sweeper_removed_total{kind}`.
+- `migrations/0011_deletion.sql`: the two functions (added to the isolation suite's closed
+  list), `system_access` on `documents` for `app_system`, and `DELETE` on `usage_events` /
+  `tenant_usage_counters` for the purge.

@@ -1,6 +1,6 @@
 // Command worker runs background jobs from the Postgres queue (spec 004).
-// Registered kinds: ingest (005). cleanup (013) lands later; claim_job only
-// returns kinds that have a handler, so cleanup jobs wait in the queue.
+// Registered kinds: ingest (005), cleanup and purge (013). It also runs the
+// retention sweeper (013).
 //
 // The same binary is the parser helper: run with extract.HelperArg it
 // extracts one file from stdin under resource limits and exits (ING-REQ-002).
@@ -18,6 +18,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/breaker"
 	"github.com/kavish924/multi-tenant-rag/internal/config"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion"
+	"github.com/kavish924/multi-tenant-rag/internal/ingestion/cleanup"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/embed"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/extract"
 	"github.com/kavish924/multi-tenant-rag/internal/jobs"
@@ -84,6 +85,16 @@ func run(log *slog.Logger) error {
 		Log:       log,
 	}
 
+	// Deletion (spec 013): cleanup and purge jobs, and the retention sweeper
+	// (one active across workers, via an advisory lock).
+	cleaner := &cleanup.Cleaner{Objects: objects, Log: log}
+	purger := &cleanup.Purger{Cleaner: cleaner}
+	sweeper := &cleanup.Sweeper{
+		Pool: store.Pool(), Store: store, Objects: objects,
+		Retention: cfg.Retention, Interval: cfg.SweepInterval, OrphanGrace: cfg.OrphanGrace, Log: log,
+	}
+	go sweeper.Run(ctx)
+
 	queue := jobs.NewQueue(store, jobs.DefaultLease)
 	queue.SetTenantCap(int(cfg.Quotas.ConcurrentJobs)) // QTA-REQ-002 worker gate
 	// jobs_queue_depth / jobs_queue_age_seconds (OBS-REQ-004).
@@ -92,8 +103,12 @@ func run(log *slog.Logger) error {
 	}
 	hostname, _ := os.Hostname()
 	r := &jobs.Runner{
-		Queue:       queue,
-		Handlers:    map[string]jobs.Handler{ingestion.JobKind: pipeline.Handle},
+		Queue: queue,
+		Handlers: map[string]jobs.Handler{
+			ingestion.JobKind:  pipeline.Handle,
+			cleanup.JobCleanup: cleaner.Handle,
+			cleanup.JobPurge:   purger.Handle,
+		},
 		Tenant:      jobs.StoreScoper(store),
 		WorkerID:    hostname + "-" + strconv.Itoa(os.Getpid()),
 		Concurrency: cfg.Concurrency,

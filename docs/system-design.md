@@ -97,7 +97,7 @@ Instead, expose each one as a narrow **system function**:
 | `memberships_for_user(user_id)` | `cmd/api` auth middleware | `(tenant_id, role)` rows |
 | `outbox_next(limit)` / `outbox_mark_published(id)` / `outbox_mark_failed(id, error, max)` | `cmd/outbox-relay` | unpublished rows / ack / poison-row count |
 | `job_queue_stats()` | `cmd/worker` metrics | `(kind, depth, oldest_age_seconds)` |
-| `sweep_candidates(limit)` | worker sweeper | `(tenant_id, document_id)` past retention |
+| `sweep_candidates(retention, limit)` / `sweep_delete_document(id, retention)` | worker sweeper | `(tenant_id, document_id)` past retention / guarded hard delete (spec 013) |
 
 The set of system functions is small and closed; adding one is a reviewed migration, and the
 isolation suite (`015`) asserts the `app` role has no other way to read across tenants.
