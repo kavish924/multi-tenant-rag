@@ -14,12 +14,14 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/api"
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/config"
+	"github.com/kavish924/multi-tenant-rag/internal/conversations"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
+	"github.com/kavish924/multi-tenant-rag/internal/usage"
 )
 
 func main() {
@@ -58,6 +60,17 @@ func run(log *slog.Logger) error {
 	// Questions must be embedded by the same provider as ingestion
 	// (cmd/worker): llm.Fake until the Vertex AI provider lands.
 	var embedder llm.EmbeddingProvider = llm.Fake{}
+	// Gemini on Vertex AI lands with the GCP work; until then a
+	// deterministic extractive fake answers from source 1.
+	var generator llm.Generator = llm.FakeGenerator{}
+	retriever := retrieval.NewHybrid(store, embedder, retrieval.Options{}, log)
+	ask := &conversations.Handler{
+		Retriever:  retriever,
+		Generator:  generator,
+		Usage:      usage.NewRecorder(store),
+		EmbedModel: embedder.Model(),
+		Log:        log,
+	}
 
 	srv := &http.Server{
 		Addr: cfg.Addr,
@@ -66,7 +79,8 @@ func run(log *slog.Logger) error {
 			Tokens:    tokens,
 			Tenants:   tenants.NewService(store),
 			Documents: documents.NewService(store, objects, cfg.MaxUploadBytes),
-			Retriever: retrieval.NewHybrid(store, embedder, retrieval.Options{}, log),
+			Retriever: retriever,
+			Ask:       http.HandlerFunc(ask.Ask),
 			Ready:     store.Ping,
 			Log:       log,
 		}),

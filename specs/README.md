@@ -34,7 +34,7 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | [005](./005-ingestion-pipeline/) | Ingestion pipeline | 2 — Async ingestion | In progress |
 | [006](./006-outbox-messaging/) | Outbox messaging | 2 — Async ingestion | In progress |
 | [007](./007-hybrid-retrieval/) | Hybrid retrieval (RRF) | 3 — RAG end to end | In progress |
-| [008](./008-generation-citations/) | Generation, streaming & citations | 3 — RAG end to end | Draft |
+| [008](./008-generation-citations/) | Generation, streaming & citations | 3 — RAG end to end | In progress |
 | [009](./009-reranking/) | Reranking (optional stage) | 3 — RAG end to end | Draft |
 | [010](./010-observability/) | Observability | 4 — Observable production | Draft |
 | [011](./011-quotas-cost-control/) | Quotas & cost control | 4 — Observable production | Draft |

@@ -26,6 +26,7 @@ type Deps struct {
 	Tenants   *tenants.Service
 	Documents *documents.Service  // optional: document routes are mounted only when set
 	Retriever retrieval.Retriever // optional: POST /search is mounted only when set
+	Ask       http.Handler        // optional: POST /ask and POST /tenants/{tenant}/ask (spec 008)
 	Ready     func(context.Context) error
 	Log       *slog.Logger
 }
@@ -71,6 +72,11 @@ func New(d Deps) http.Handler {
 	}
 	if d.Retriever != nil {
 		mux.Handle("POST /search", tenantRoute(tenants.RoleMember, s.search))
+	}
+	if d.Ask != nil {
+		ask := d.Ask.ServeHTTP
+		mux.Handle("POST /ask", tenantRoute(tenants.RoleMember, ask))
+		mux.Handle("POST /tenants/{tenant}/ask", tenantRoute(tenants.RoleMember, ask))
 	}
 
 	return logRequests(d.Log, mux)

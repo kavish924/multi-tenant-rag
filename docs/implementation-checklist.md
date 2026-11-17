@@ -123,11 +123,11 @@ pulled forward here.
   - [ ] Iterative scan or over-fetch decision, tested with the **smallest tenant** (2.1) *(decided and coded; test not yet run)*
   - [ ] RRF unit tests, seeded multi-tenant suite, latency benchmark (Group 3) *(unit tests pass; suite written, not run; benchmark pending)*
 - [ ] **[008 Generation & citations](../specs/008-generation-citations/tasks.md)**
-  - [ ] Grounded prompt builder with untrusted-data delimiters (1.1)
-  - [ ] Vertex AI `Generator` stream (tokens + terminal error + usage) + mock (1.2)
-  - [ ] SSE handler — events end with a blank line (1.3)
-  - [ ] `ResolveCitations`, usage rows, disconnect propagation, citation re-authorization (Group 2)
-  - [ ] SSE, citation, zero-hit, and failure-path tests (Group 3)
+  - [x] Grounded prompt builder with untrusted-data delimiters (1.1)
+  - [ ] Vertex AI `Generator` stream (tokens + terminal error + usage) + mock (1.2) *(stream abstraction + fake done; Vertex pending GCP)*
+  - [x] SSE handler — events end with a blank line (1.3)
+  - [x] `ResolveCitations`, usage rows, disconnect propagation, citation re-authorization (Group 2)
+  - [ ] SSE, citation, zero-hit, and failure-path tests (Group 3) *(unit tests pass; end-to-end DB suite written, not yet run)*
 - [ ] **[009 Reranking](../specs/009-reranking/tasks.md)** (optional stage, off by default)
   - [ ] Interface + implementation(s) + timeout / fail-open (Groups 1–2)
   - [ ] Keep only if the A/B eval shows it earns its latency and cost (3.2)
