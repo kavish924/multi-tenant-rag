@@ -32,7 +32,7 @@ Copy [`_template/`](./_template/) when creating a new spec directory.
 | [003](./003-object-storage/) | Object storage | 2 — Async ingestion | In progress |
 | [004](./004-job-queue/) | Job queue (PostgreSQL) | 2 — Async ingestion | In progress |
 | [005](./005-ingestion-pipeline/) | Ingestion pipeline | 2 — Async ingestion | In progress |
-| [006](./006-outbox-messaging/) | Outbox messaging | 2 — Async ingestion | Draft |
+| [006](./006-outbox-messaging/) | Outbox messaging | 2 — Async ingestion | In progress |
 | [007](./007-hybrid-retrieval/) | Hybrid retrieval (RRF) | 3 — RAG end to end | Draft |
 | [008](./008-generation-citations/) | Generation, streaming & citations | 3 — RAG end to end | Draft |
 | [009](./009-reranking/) | Reranking (optional stage) | 3 — RAG end to end | Draft |

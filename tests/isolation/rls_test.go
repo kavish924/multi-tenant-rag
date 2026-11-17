@@ -21,11 +21,14 @@ import (
 )
 
 // systemFunctions is the closed list from TEN-REQ-010. Later specs append
-// claim_job (004), outbox_next / outbox_mark_published (006) and
-// sweep_candidates (013) in the same migration review that adds them.
+// claim_job (004), outbox_next / outbox_mark_published / outbox_mark_failed
+// (006) and sweep_candidates (013) in the same migration review that adds them.
 var systemFunctions = []string{
 	"claim_job(text,interval,text[])",
 	"memberships_for_user(uuid)",
+	"outbox_mark_failed(bigint,text,integer)",
+	"outbox_mark_published(bigint)",
+	"outbox_next(integer)",
 }
 
 // globalTables are the only application tables allowed without forced RLS.

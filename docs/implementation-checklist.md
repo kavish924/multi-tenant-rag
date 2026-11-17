@@ -104,9 +104,9 @@ pulled forward here.
   - [ ] **Delete-vs-Index interleaving test** (4.2a) *(written, not yet run)*
   - [ ] Rerun idempotency, end-to-end fixtures, load profile (Group 5)
 - [ ] **[006 Outbox messaging](../specs/006-outbox-messaging/tasks.md)**
-  - [ ] `outbox` table + `Emit`; `outbox_next` / `outbox_mark_published` system functions
-  - [ ] `LogPublisher` + relay binary; poison-row quarantine
-  - [ ] Emission points wired in 002 / 005 / 013; atomicity, redelivery, ordering tests
+  - [x] `outbox` table + `Emit`; `outbox_next` / `outbox_mark_published` / `outbox_mark_failed` system functions
+  - [x] `LogPublisher` + relay binary; poison-row quarantine
+  - [ ] Emission points wired in 002 / 005 / 013; atomicity, redelivery, ordering tests *(002/005 wired; tests written, not yet run)*
 - [ ] Terraform + Cloud Build: `worker` and `outbox-relay` worker pools deployed to dev
 - [ ] Drill on dev: stop a worker instance mid-job → job recovers, document consistent
 

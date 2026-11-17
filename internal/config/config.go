@@ -165,3 +165,58 @@ func env(key, def string) string {
 	}
 	return def
 }
+
+// Relay is the configuration of cmd/outbox-relay (spec 006).
+type Relay struct {
+	DB           DB
+	Publisher    string // OUTBOX_PUBLISHER: "log" (Pub/Sub lands with the GCP work)
+	BatchSize    int
+	PollInterval time.Duration
+	MaxAttempts  int
+	LogLevel     string
+}
+
+// LoadRelay reads cmd/outbox-relay configuration.
+func LoadRelay() (Relay, error) {
+	db, err := LoadDB()
+	if err != nil {
+		return Relay{}, err
+	}
+	r := Relay{
+		DB:           db,
+		Publisher:    env("OUTBOX_PUBLISHER", "log"),
+		BatchSize:    100,
+		PollInterval: time.Second,
+		MaxAttempts:  5,
+		LogLevel:     env("LOG_LEVEL", "info"),
+	}
+	if r.Publisher != "log" {
+		return Relay{}, fmt.Errorf("config: OUTBOX_PUBLISHER %q not supported yet (only log)", r.Publisher)
+	}
+	if r.BatchSize, err = intEnv("OUTBOX_BATCH_SIZE", r.BatchSize, 1, 1000); err != nil {
+		return Relay{}, err
+	}
+	if r.MaxAttempts, err = intEnv("OUTBOX_MAX_ATTEMPTS", r.MaxAttempts, 1, 100); err != nil {
+		return Relay{}, err
+	}
+	if v := os.Getenv("OUTBOX_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 10*time.Millisecond || d > time.Minute {
+			return Relay{}, errors.New("config: OUTBOX_POLL_INTERVAL must be a duration in [10ms, 1m]")
+		}
+		r.PollInterval = d
+	}
+	return r, nil
+}
+
+func intEnv(key string, def, lo, hi int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < lo || n > hi {
+		return 0, fmt.Errorf("config: %s must be %d..%d", key, lo, hi)
+	}
+	return n, nil
+}

@@ -100,8 +100,8 @@ steps:
           --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/migrate:${COMMIT_SHA}
         gcloud run jobs execute migrate --region=${_REGION} --wait
 
-  # worker and outbox-relay are stubs until specs 004/006; they are built and
-  # pushed above but not deployed yet.
+  # worker and outbox-relay are built and pushed above but not deployed yet:
+  # their Cloud Run worker pools land with the dev Terraform for 004/006.
   - id: deploy-api-dev
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     waitFor: [migrate-dev]

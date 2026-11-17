@@ -331,3 +331,79 @@ func TestIngestFailures(t *testing.T) {
 		t.Errorf("malformed state %+v", s)
 	}
 }
+
+// topics lists the outbox topics emitted for a document, in id order.
+func topics(t *testing.T, id uuid.UUID) []string {
+	t.Helper()
+	rows, err := env.Admin.Query(context.Background(),
+		`SELECT topic FROM outbox WHERE payload->>'document_id' = $1 ORDER BY id`, id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+type flaky struct{ llm.Fake }
+
+func (flaky) Embed(context.Context, []string) ([][]float32, error) {
+	return nil, errors.New("embedding service unavailable")
+}
+
+// OBX-REQ-002 / ING-AC-008: indexed, failed and deleting events are emitted
+// in the transaction of the state change they report.
+func TestIngestEvents(t *testing.T) {
+	env.Truncate(t)
+	tid := env.SeedTenant(t, "A", nil)
+	ctx := context.Background()
+
+	id, j := upload(t, tid, documents.TypeText, longText(5))
+	if err := handle(t, pipeline(llm.Fake{}), j); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(topics(t, id), ","); got != "document.created,document.indexed" {
+		t.Errorf("indexed: %s", got)
+	}
+	var chunks int
+	_ = env.Admin.QueryRow(ctx, `SELECT (payload->>'chunks')::int FROM outbox WHERE topic = 'document.indexed' AND payload->>'document_id' = $1`, id.String()).Scan(&chunks)
+	if chunks != state(t, id).chunks {
+		t.Errorf("indexed event chunks %d, rows %d", chunks, state(t, id).chunks)
+	}
+
+	// Retryable failure: no event until the last attempt.
+	id, j = upload(t, tid, documents.TypeText, longText(4))
+	if err := handle(t, pipeline(flaky{}), j); err == nil || jobs.IsPermanent(err) {
+		t.Fatalf("flaky embed: %v", err)
+	}
+	if got := strings.Join(topics(t, id), ","); got != "document.created" {
+		t.Errorf("non-final failure emitted: %s", got)
+	}
+	j.Attempts = j.MaxAttempts
+	_ = handle(t, pipeline(flaky{}), j)
+	if got := strings.Join(topics(t, id), ","); got != "document.created,document.failed" {
+		t.Errorf("final failure: %s", got)
+	}
+	var reason string
+	_ = env.Admin.QueryRow(ctx, `SELECT payload->>'reason' FROM outbox WHERE topic = 'document.failed' AND payload->>'document_id' = $1`, id.String()).Scan(&reason)
+	if reason != ingestion.ReasonEmbedding {
+		t.Errorf("failed reason %q", reason)
+	}
+
+	// Deleted before Index: deleting, never indexed.
+	id, j = upload(t, tid, documents.TypeText, longText(6))
+	p := pipeline(llm.Fake{})
+	p.BeforeIndex = func(ctx context.Context, _ uuid.UUID) {
+		if _, err := docs.Delete(ctx, tid, id); err != nil {
+			t.Error(err)
+		}
+	}
+	if err := handle(t, p, j); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(topics(t, id), ","); got != "document.created,document.deleting" {
+		t.Errorf("deleted before index: %s", got)
+	}
+}

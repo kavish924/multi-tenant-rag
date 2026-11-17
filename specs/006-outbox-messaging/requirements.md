@@ -1,7 +1,7 @@
 # 006 — Outbox Messaging: Requirements
 
 - **Spec ID:** 006 `OBX`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 2 — Async ingestion
 - **Depends on:** `specs/004-job-queue`
 - **Shared context:** `docs/system-design.md §4` (when you add a broker)

@@ -22,7 +22,7 @@
 - [x] 4.1 Index tx: `SELECT ... FOR UPDATE` on the document (cancel if deleted), upsert chunks, drop stale tail ordinals, guarded status → `indexed`. (ING-REQ-008, ING-AC-005/006)
 - [x] 4.2 Failure path: status `failed` + `error` reason mapping table; every status write guarded by `deleted_at IS NULL`; job on an already-deleted document completes as cancelled. (ING-REQ-009, ING-REQ-010, ING-AC-006)
 - [ ] 4.2a *(written in `internal/ingestion/pipeline_integration_test.go`, not yet run)* Interleaving test: hold the Index tx before its locked read, commit Delete on a second connection, release → no chunks, status still `deleting`. (ING-AC-009)
-- [ ] 4.3 *(waits for 006 outbox table)* Outbox emission points `document.indexed` / `document.failed` (contract with `006`). (ING-AC-008)
+- [x] 4.3 Outbox emission points `document.indexed` / `document.failed` (contract with `006`). (ING-AC-008)
 
 ## Group 5: Tests and verification
 
