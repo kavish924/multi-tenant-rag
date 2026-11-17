@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 )
 
@@ -89,6 +91,8 @@ func (s *Stage) Apply(ctx context.Context, tenantID uuid.UUID, question string, 
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
+	ctx, span := observability.Start(ctx, "rerank", observability.AttrTenantID.String(tenantID.String()))
+	defer span.End()
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -105,7 +109,12 @@ func (s *Stage) Apply(ctx context.Context, tenantID uuid.UUID, question string, 
 		case errors.Is(err, ErrMalformed), errors.Is(err, ErrInvalid):
 			reason = "invalid"
 		}
-		s.log().Warn("rerank fallback to fused order", "tenant_id", tenantID, "reason", reason,
+		span.SetAttributes(attribute.String("rerank.fallback", reason))
+		observability.M().RerankFallback(ctx, reason)
+		if reason != "invalid" {
+			observability.M().ProviderError(ctx, "reranker", "rerank")
+		}
+		s.log().WarnContext(ctx, "rerank fallback to fused order", "tenant_id", tenantID, "reason", reason,
 			"duration_ms", time.Since(start).Milliseconds(), "err", err)
 		if s.OnFallback != nil {
 			s.OnFallback(reason)

@@ -15,12 +15,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/chunk"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/embed"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/extract"
 	"github.com/kavish924/multi-tenant-rag/internal/jobs"
 	"github.com/kavish924/multi-tenant-rag/internal/messaging"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
 )
@@ -93,7 +95,7 @@ func (p *Pipeline) Handle(ctx context.Context, job jobs.Job, tx jobs.TenantTx) e
 		return err
 	}
 	if !ok {
-		log.Info("document deleted or gone; ingest cancelled")
+		log.InfoContext(ctx, "document deleted or gone; ingest cancelled")
 		return nil // completes as cancelled (ING-REQ-010)
 	}
 
@@ -107,17 +109,18 @@ func (p *Pipeline) Handle(ctx context.Context, job jobs.Job, tx jobs.TenantTx) e
 		// failure or the job's last attempt (ING-AC-008).
 		final := se.permanent || job.Attempts >= job.MaxAttempts
 		p.markFailed(ctx, tx, job.TenantID, docID, se, final)
-		log.Warn("ingest failed", "reason", se.reason, "permanent", se.permanent, "err", se.err)
+		observability.M().IngestFailure(ctx, se.reason)
+		log.WarnContext(ctx, "ingest failed", "reason", se.reason, "permanent", se.permanent, "err", se.err)
 		if se.permanent {
 			return jobs.Permanent(err)
 		}
 		return err
 	}
 	if cancelled {
-		log.Info("document deleted before index; no chunks written")
+		log.InfoContext(ctx, "document deleted before index; no chunks written")
 		return nil
 	}
-	log.Info("document indexed", "chunks", n)
+	log.InfoContext(ctx, "document indexed", "chunks", n)
 	return nil
 }
 
@@ -150,16 +153,12 @@ func (p *Pipeline) start(ctx context.Context, tx jobs.TenantTx, id uuid.UUID) (d
 
 func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uuid.UUID, d docInfo) (int, bool, error) {
 	// Extract (isolated helper process).
-	body, err := p.Objects.Get(ctx, d.objectKey)
-	if errors.Is(err, objectstore.ErrNotFound) {
-		return 0, false, fail(ReasonObjectMissing, true, err)
-	}
-	if err != nil {
-		return 0, false, fail(ReasonStorage, false, err)
-	}
-	secs, err := p.Extractor.Extract(ctx, d.contentType, body)
-	_ = body.Close()
+	secs, err := p.extract(ctx, d)
 	switch {
+	case errors.Is(err, objectstore.ErrNotFound):
+		return 0, false, fail(ReasonObjectMissing, true, err)
+	case errors.Is(err, errStorage):
+		return 0, false, fail(ReasonStorage, false, err)
 	case errors.Is(err, extract.ErrLimit):
 		return 0, false, fail(ReasonParserLimit, true, err)
 	case errors.Is(err, extract.ErrMalformed):
@@ -175,7 +174,10 @@ func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uu
 	if opts.MaxTokens == 0 {
 		opts = chunk.Defaults
 	}
+	_, span := observability.Start(ctx, "chunk")
 	chunks := chunk.Split(secs, opts)
+	span.SetAttributes(attribute.Int("chunks", len(chunks)))
+	span.End()
 	if len(chunks) == 0 {
 		return 0, false, fail(ReasonNoText, true, errors.New("no text could be extracted"))
 	}
@@ -197,11 +199,30 @@ func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uu
 	if p.BeforeIndex != nil {
 		p.BeforeIndex(ctx, docID)
 	}
-	cancelled, err := p.index(ctx, tx, tenantID, docID, chunks, vecs)
+	ictx, span := observability.Start(ctx, "index write", attribute.Int("chunks", len(chunks)))
+	cancelled, err := p.index(ictx, tx, tenantID, docID, chunks, vecs)
+	observability.End(span, err)
 	if err != nil {
 		return 0, false, fail(ReasonInternal, false, err)
 	}
 	return len(chunks), cancelled, nil
+}
+
+var errStorage = errors.New("object storage error")
+
+// extract reads the object and parses it in the helper process.
+func (p *Pipeline) extract(ctx context.Context, d docInfo) (secs []extract.Section, err error) {
+	ctx, span := observability.Start(ctx, "extract", attribute.String("content_type", d.contentType))
+	defer func() { observability.End(span, err) }()
+	body, err := p.Objects.Get(ctx, d.objectKey)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errStorage, err)
+	}
+	defer func() { _ = body.Close() }()
+	return p.Extractor.Extract(ctx, d.contentType, body)
 }
 
 // index writes chunks and marks the document indexed in one transaction

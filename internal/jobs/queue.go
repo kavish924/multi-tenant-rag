@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 )
 
@@ -66,6 +67,7 @@ func Enqueue(ctx context.Context, tx pgx.Tx, p EnqueueParams) (id uuid.UUID, cre
 			return uuid.Nil, false, fmt.Errorf("jobs: payload: %w", err)
 		}
 	}
+	payload = withTraceParent(payload, observability.TraceParent(ctx))
 	maxAttempts := p.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxAttempts
@@ -224,4 +226,48 @@ func Permanent(err error) error {
 func IsPermanent(err error) bool {
 	var p permanentError
 	return errors.As(err, &p)
+}
+
+// traceParentKey carries the enqueuing span's W3C context in the payload
+// (OBS-REQ-003). Handlers ignore it; old payloads without it still work.
+const traceParentKey = "traceparent"
+
+// withTraceParent adds traceparent to a JSON object payload.
+func withTraceParent(payload []byte, tp string) []byte {
+	if tp == "" {
+		return payload
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &m); err != nil || m == nil {
+		return payload // not an object: leave it alone
+	}
+	v, _ := json.Marshal(tp)
+	m[traceParentKey] = v
+	out, err := json.Marshal(m)
+	if err != nil {
+		return payload
+	}
+	return out
+}
+
+func traceParentOf(payload []byte) string {
+	var m struct {
+		TP string `json:"traceparent"`
+	}
+	_ = json.Unmarshal(payload, &m)
+	return m.TP
+}
+
+// Stats reports queue depth and oldest-runnable age per kind across all
+// tenants through the job_queue_stats system function (OBS-REQ-004).
+func (q *Queue) Stats(ctx context.Context) ([]observability.QueueStat, error) {
+	rows, err := q.store.Pool().Query(ctx, `SELECT kind, depth, oldest_age_seconds FROM job_queue_stats()`)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: stats: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (observability.QueueStat, error) {
+		var s observability.QueueStat
+		err := r.Scan(&s.Kind, &s.Depth, &s.OldestAgeS)
+		return s, err
+	})
 }

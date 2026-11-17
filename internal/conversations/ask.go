@@ -12,6 +12,7 @@ import (
 
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
@@ -88,7 +89,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		if ctx.Err() != nil {
 			return // client gone; nothing to answer
 		}
-		log.Error("ask: retrieval failed", "tenant_id", m.TenantID, "err", err)
+		log.ErrorContext(ctx, "ask: retrieval failed", "tenant_id", m.TenantID, "err", err)
 		// GEN-AC-006: 502 before the stream opens.
 		httpx.Error(w, http.StatusBadGateway, "retrieval_failed", "retrieval failed")
 		return
@@ -120,7 +121,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 
 	// GEN-AC-005 / GEN-REQ-009: no sources, no model call, no fabrication.
 	if len(hits) == 0 {
-		log.Info("ask: no sources; insufficient context", "tenant_id", m.TenantID)
+		log.InfoContext(ctx, "ask: no sources; insufficient context", "tenant_id", m.TenantID)
 		if send("token", tokenPayload{T: llm.InsufficientContext}) {
 			send("done", donePayload{Citations: []Citation{}, InsufficientContext: true})
 		}
@@ -130,7 +131,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	p := BuildPrompt(question, hits, h.MaxContextTokens)
 	p.Request.MaxOutputTokens = h.maxOutput()
 	// GEN-AC-008: prompt metadata only, never document text.
-	log.Info("ask: prompt", "tenant_id", m.TenantID, "sources", len(p.Sources),
+	log.InfoContext(ctx, "ask: prompt", "tenant_id", m.TenantID, "sources", len(p.Sources),
 		"chunk_ids", chunkIDs(p.Sources), "context_tokens", p.ContextTokens, "model", h.Generator.Model())
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -138,10 +139,23 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	gen := usage.Event{TenantID: m.TenantID, Kind: usage.KindGenerate, Model: h.Generator.Model()}
 	defer func() { h.record(ctx, gen) }() // every terminal path (GEN-AC-007)
 
+	// OBS-REQ-002: "llm total" spans the whole stream, "llm first-token"
+	// the wait for the first fragment.
+	genCtx, total := observability.Start(genCtx, "llm total", observability.AttrProvider.String(h.Generator.Model()))
+	_, first := observability.Start(genCtx, "llm first-token")
+	var genErr error
+	defer func() {
+		first.End() // no-op if already ended
+		if genErr != nil && ctx.Err() == nil {
+			observability.M().ProviderError(ctx, h.Generator.Model(), "generate")
+		}
+		observability.End(total, genErr)
+	}()
 	stream, err := h.Generator.Stream(genCtx, p.Request)
 	if err != nil {
+		genErr = err
 		gen.Outcome = outcome(ctx)
-		log.Error("ask: generation did not start", "tenant_id", m.TenantID, "err", err)
+		log.ErrorContext(ctx, "ask: generation did not start", "tenant_id", m.TenantID, "err", err)
 		send("error", errorPayload{Message: "generation failed"})
 		return
 	}
@@ -154,15 +168,19 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
+			genErr = err
 			gen.Outcome = outcome(ctx)
 			gen.InputTokens, gen.OutputTokens = stream.Usage().InputTokens, stream.Usage().OutputTokens
 			if ctx.Err() != nil {
-				log.Info("ask: client disconnected; generation cancelled", "tenant_id", m.TenantID)
+				log.InfoContext(ctx, "ask: client disconnected; generation cancelled", "tenant_id", m.TenantID)
 				return
 			}
-			log.Error("ask: generation failed mid-stream", "tenant_id", m.TenantID, "err", err)
+			log.ErrorContext(ctx, "ask: generation failed mid-stream", "tenant_id", m.TenantID, "err", err)
 			send("error", errorPayload{Message: "generation failed"})
 			return
+		}
+		if answer.Len() == 0 {
+			first.End()
 		}
 		answer.WriteString(tok)
 		if !send("token", tokenPayload{T: tok}) {

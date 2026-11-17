@@ -17,6 +17,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/conversations"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
@@ -26,8 +27,14 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(log); err != nil {
+	log, flush, err := telemetry("api")
+	if err != nil {
+		log.Error("telemetry setup", "err", err)
+		os.Exit(1)
+	}
+	err = run(log)
+	flush()
+	if err != nil {
 		log.Error("api exited", "err", err)
 		os.Exit(1)
 	}
@@ -124,4 +131,28 @@ func rerankStage(c config.Rerank, gen llm.Generator, rec *usage.Recorder, log *s
 	}
 	log.Info("rerank stage", "enabled", c.Enabled, "provider", c.Provider, "keep", c.Keep, "timeout", c.Timeout.String())
 	return st
+}
+
+// telemetry installs the Cloud Logging JSON logger and OpenTelemetry
+// (spec 010); the returned func flushes telemetry on exit.
+func telemetry(service string) (*slog.Logger, func(), error) {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(os.Getenv("LOG_LEVEL"))); err != nil {
+		level = slog.LevelInfo
+	}
+	log := observability.NewLogger(os.Stdout, level)
+	slog.SetDefault(log)
+	oc, err := observability.ConfigFromEnv(service)
+	if err != nil {
+		return log, func() {}, err
+	}
+	shutdown, err := observability.Setup(context.Background(), oc)
+	if err != nil {
+		return log, func() {}, err
+	}
+	return log, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+	}, nil
 }

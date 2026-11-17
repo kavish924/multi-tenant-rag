@@ -1,0 +1,45 @@
+# OpenTelemetry collector sidecar for Cloud Run (spec 010, OBS-REQ-001).
+# The app exports OTLP gRPC to localhost:4317; traces go to Cloud Trace and
+# metrics to Managed Service for Prometheus. Stored in Secret Manager by
+# Terraform and mounted at /etc/otelcol/config.yaml.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+
+processors:
+  # Bound memory first; drop rather than grow when the backends are slow.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 65
+    spike_limit_percentage: 20
+  batch:
+    send_batch_size: 200
+    timeout: 5s
+  resourcedetection:
+    detectors: [env, gcp]
+    timeout: 2s
+    override: false
+
+exporters:
+  googlecloud:
+    log:
+      default_log_name: otel-collector
+  googlemanagedprometheus: {}
+
+extensions:
+  health_check:
+    endpoint: localhost:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [googlecloud]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [googlemanagedprometheus]

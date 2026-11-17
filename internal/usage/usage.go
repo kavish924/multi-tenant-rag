@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 )
 
@@ -71,5 +72,8 @@ func (r *Recorder) Record(ctx context.Context, e Event) error {
 	if err != nil {
 		return fmt.Errorf("usage: record: %w", err)
 	}
+	// tokens_total / estimated_cost_usd_total are fed from the rows that
+	// were actually written (OBS-REQ-004).
+	observability.M().Usage(ctx, e.TenantID, e.Kind, e.Model, e.InputTokens, e.OutputTokens)
 	return nil
 }

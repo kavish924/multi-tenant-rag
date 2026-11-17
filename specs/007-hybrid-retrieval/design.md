@@ -47,7 +47,8 @@ WHERE c.tenant_id = $1 AND d.deleted_at IS NULL  -- set with 'deleting'; also co
 
 Per-doc cap: `row_number() OVER (PARTITION BY c.document_id ORDER BY score DESC) <= $cap`.
 
-**As built:** `hybrid.sql` returns the union of both legs' candidates with each leg's rank;
+**As built** (since `010`, the query is three statements in one tenant transaction —
+`vector.sql`, `fulltext.sql`, `hydrate.sql` — so each leg has its own span): the SQL returns the union of both legs' candidates with each leg's rank;
 `retrieval.Fuse` computes the RRF score, sorts (ties: vector rank, text rank, chunk id), applies
 the per-document cap and the limit. Both legs exclude deleted documents (`NOT EXISTS ...
 deleted_at IS NOT NULL`) so deleted chunks never use up candidate slots, and the outer query joins

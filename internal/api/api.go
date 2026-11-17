@@ -15,6 +15,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
@@ -79,7 +80,9 @@ func New(d Deps) http.Handler {
 		mux.Handle("POST /tenants/{tenant}/ask", tenantRoute(tenants.RoleMember, ask))
 	}
 
-	return logRequests(d.Log, mux)
+	// Outermost: request id + server span + latency metric (spec 010), so
+	// the request log line carries the trace and request ids.
+	return observability.Middleware(logRequests(d.Log, mux))
 }
 
 func (s *server) ready(w http.ResponseWriter, r *http.Request) {

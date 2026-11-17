@@ -16,6 +16,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
@@ -282,5 +285,33 @@ func TestSmallTenantRecall(t *testing.T) {
 	}
 	if n != 3 {
 		t.Errorf("small tenant got %d of 3 vector hits: %+v", n, hits)
+	}
+}
+
+// OBS-AC-001 (retrieval half): one retrieve span with the embed, vector,
+// full-text, hydrate and fusion children.
+func TestSearchSpans(t *testing.T) {
+	env.Truncate(t)
+	tid := env.SeedTenant(t, "A", nil)
+	seedDoc(t, tid, "a.txt", "Refund policy ERR-9.")
+	rec := tracetest.NewSpanRecorder()
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	defer otel.SetTracerProvider(prev)
+
+	search(t, tid, "refund ERR-9", 8)
+	byName := map[string]sdktrace.ReadOnlySpan{}
+	for _, s := range rec.Ended() {
+		byName[s.Name()] = s
+	}
+	root := byName["retrieve"]
+	if root == nil {
+		t.Fatalf("no retrieve span: %v", byName)
+	}
+	for _, name := range []string{"embed question", "vector search", "full-text search", "hydrate candidates", "fusion"} {
+		s := byName[name]
+		if s == nil || s.Parent().SpanID() != root.SpanContext().SpanID() {
+			t.Errorf("span %q missing or not under retrieve", name)
+		}
 	}
 }

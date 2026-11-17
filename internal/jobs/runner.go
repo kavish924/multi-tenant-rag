@@ -13,6 +13,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 )
 
 // Claimer is the queue surface the runner needs (implemented by *Queue).
@@ -109,7 +112,9 @@ loop:
 			<-sem
 			break
 		}
+		claimStart := time.Now()
 		job, err := r.Queue.Claim(ctx, r.WorkerID, kinds)
+		claimEnd := time.Now()
 		if err != nil || job == nil {
 			<-sem
 			if err != nil && ctx.Err() == nil {
@@ -121,10 +126,11 @@ loop:
 			continue
 		}
 		wg.Add(1)
+		observability.M().JobAttempt(ctx, job.Kind)
 		go func(j Job) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			r.process(jobCtx, j)
+			r.process(jobCtx, j, claimStart, claimEnd)
 		}(*job)
 	}
 
@@ -141,8 +147,19 @@ loop:
 	return nil
 }
 
-func (r *Runner) process(parent context.Context, job Job) {
+func (r *Runner) process(parent context.Context, job Job, claimStart, claimEnd time.Time) {
 	log := r.Log.With("job_id", job.ID, "tenant_id", job.TenantID, "kind", job.Kind, "attempt", job.Attempts)
+	// The job span continues the enqueuing request's trace (OBS-AC-002) and
+	// starts at the claim, which is recorded as its first child.
+	tctx := observability.WithTraceParent(parent, traceParentOf(job.Payload))
+	tctx, span := observability.Tracer().Start(tctx, "job "+job.Kind,
+		trace.WithSpanKind(trace.SpanKindConsumer), trace.WithTimestamp(claimStart),
+		trace.WithAttributes(observability.AttrJobID.String(job.ID.String()), observability.AttrJobKind.String(job.Kind),
+			observability.AttrTenantID.String(job.TenantID.String())))
+	observability.SpanAt(tctx, "claim", claimStart, claimEnd)
+	var jobErr error
+	defer func() { observability.End(span, jobErr) }()
+	parent = tctx
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -175,6 +192,7 @@ func (r *Runner) process(parent context.Context, job Job) {
 	}()
 
 	err := r.run(ctx, job)
+	jobErr = err
 	close(hbStop)
 	<-hbDone
 
@@ -193,17 +211,20 @@ func (r *Runner) process(parent context.Context, job Job) {
 			log.Error("complete failed", "err", cerr)
 			return
 		}
-		log.Info("job succeeded")
+		log.InfoContext(ctx, "job succeeded")
 		return
 	}
 	dead, ferr := r.Queue.Fail(settleCtx, job, r.WorkerID, err)
+	if ferr == nil {
+		observability.M().JobFailed(ctx, job.Kind, dead) // OBS-AC-005
+	}
 	switch {
 	case ferr != nil:
-		log.Error("fail failed", "err", ferr, "cause", err)
+		log.ErrorContext(ctx, "fail failed", "err", ferr, "cause", err)
 	case dead:
-		log.Error("job dead-lettered", "err", err)
+		log.ErrorContext(ctx, "job dead-lettered", "err", err)
 	default:
-		log.Warn("job failed; retry scheduled", "err", err)
+		log.WarnContext(ctx, "job failed; retry scheduled", "err", err)
 	}
 }
 

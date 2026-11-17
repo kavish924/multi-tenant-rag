@@ -19,11 +19,20 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 )
 
-//go:embed hybrid.sql
-var hybridSQL string
+// The three statements run in one tenant transaction; they are separate
+// so each leg gets its own span (OBS-REQ-002).
+var (
+	//go:embed vector.sql
+	vectorSQL string
+	//go:embed fulltext.sql
+	fulltextSQL string
+	//go:embed hydrate.sql
+	hydrateSQL string
+)
 
 // Defaults (RET-REQ-002/004/006).
 const (
@@ -142,12 +151,22 @@ func (h *Hybrid) Search(ctx context.Context, tenantID uuid.UUID, question string
 	}
 	limit = min(limit, 2*h.opts.CandidatesPerLeg)
 
-	vecs, err := h.embedder.Embed(ctx, []string{q})
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrEmbeddingFailure, err)
+	ctx, span := observability.Start(ctx, "retrieve", observability.AttrTenantID.String(tenantID.String()))
+	hits, err := h.search(ctx, tenantID, q, limit)
+	observability.End(span, err)
+	return hits, err
+}
+
+func (h *Hybrid) search(ctx context.Context, tenantID uuid.UUID, q string, limit int) ([]Hit, error) {
+	ectx, span := observability.Start(ctx, "embed question", observability.AttrProvider.String(h.embedder.Model()))
+	vecs, err := h.embedder.Embed(ectx, []string{q})
+	if err == nil && (len(vecs) != 1 || len(vecs[0]) != llm.EmbeddingDim) {
+		err = fmt.Errorf("got %d vectors, want 1 of %d dims", len(vecs), llm.EmbeddingDim)
 	}
-	if len(vecs) != 1 || len(vecs[0]) != llm.EmbeddingDim {
-		return nil, fmt.Errorf("%w: got %d vectors, want 1 of %d dims", ErrEmbeddingFailure, len(vecs), llm.EmbeddingDim)
+	observability.End(span, err)
+	if err != nil {
+		observability.M().ProviderError(ctx, h.embedder.Model(), "embed")
+		return nil, fmt.Errorf("%w: %w", ErrEmbeddingFailure, err)
 	}
 	qvec := storage.VectorLiteral(vecs[0])
 
@@ -156,22 +175,72 @@ func (h *Hybrid) Search(ctx context.Context, tenantID uuid.UUID, question string
 		if err := h.tuneScan(ctx, tx); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, hybridSQL, tenantID, qvec, q, h.opts.CandidatesPerLeg)
+		vranks, err := legRanks(ctx, tx, "vector search", vectorSQL, tenantID, qvec, h.opts.CandidatesPerLeg)
 		if err != nil {
 			return err
 		}
-		cands, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (Hit, error) {
-			var c Hit
-			err := r.Scan(&c.ChunkID, &c.DocumentID, &c.Filename, &c.Content, &c.Page, &c.Heading,
-				&c.VectorRank, &c.TextRank)
-			return c, err
-		})
+		franks, err := legRanks(ctx, tx, "full-text search", fulltextSQL, tenantID, q, h.opts.CandidatesPerLeg)
+		if err != nil {
+			return err
+		}
+		fctx, span := observability.Start(ctx, "hydrate candidates")
+		cands, err = hydrate(fctx, tx, tenantID, vranks, franks)
+		observability.End(span, err)
 		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("retrieval: search: %w", err)
 	}
-	return Fuse(cands, h.opts.K, h.opts.PerDocumentCap, limit), nil
+	_, span = observability.Start(ctx, "fusion")
+	out := Fuse(cands, h.opts.K, h.opts.PerDocumentCap, limit)
+	span.End()
+	return out, nil
+}
+
+// legRanks runs one leg and returns chunk id → 1-based rank.
+func legRanks(ctx context.Context, tx pgx.Tx, name, sql string, args ...any) (map[uuid.UUID]int, error) {
+	ctx, span := observability.Start(ctx, name)
+	ranks := map[uuid.UUID]int{}
+	rows, err := tx.Query(ctx, sql, args...)
+	if err == nil {
+		var id uuid.UUID
+		var rnk int
+		_, err = pgx.ForEachRow(rows, []any{&id, &rnk}, func() error {
+			ranks[id] = rnk
+			return nil
+		})
+	}
+	observability.End(span, err)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	return ranks, nil
+}
+
+// hydrate loads the union of both legs' candidates with their leg ranks.
+func hydrate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, vranks, franks map[uuid.UUID]int) ([]Hit, error) {
+	ids := make([]uuid.UUID, 0, len(vranks)+len(franks))
+	for id := range vranks {
+		ids = append(ids, id)
+	}
+	for id := range franks {
+		if _, ok := vranks[id]; !ok {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, hydrateSQL, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Hit, error) {
+		var c Hit
+		err := r.Scan(&c.ChunkID, &c.DocumentID, &c.Filename, &c.Content, &c.Page, &c.Heading)
+		c.VectorRank, c.TextRank = vranks[c.ChunkID], franks[c.ChunkID]
+		return c, err
+	})
 }
 
 // tuneScan sets the HNSW scan options for this transaction only.

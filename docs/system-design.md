@@ -96,6 +96,7 @@ Instead, expose each one as a narrow **system function**:
 | `claim_job(worker_id, lease, kinds)` | `cmd/worker` | one claimed job of the given kinds (see §4) |
 | `memberships_for_user(user_id)` | `cmd/api` auth middleware | `(tenant_id, role)` rows |
 | `outbox_next(limit)` / `outbox_mark_published(id)` / `outbox_mark_failed(id, error, max)` | `cmd/outbox-relay` | unpublished rows / ack / poison-row count |
+| `job_queue_stats()` | `cmd/worker` metrics | `(kind, depth, oldest_age_seconds)` |
 | `sweep_candidates(limit)` | worker sweeper | `(tenant_id, document_id)` past retention |
 
 The set of system functions is small and closed; adding one is a reviewed migration, and the

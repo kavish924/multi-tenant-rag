@@ -1,7 +1,7 @@
 # 010 — Observability: Requirements
 
 - **Spec ID:** 010 `OBS`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 4 — Observable production
 - **Depends on:** all Milestone 1–3 specs
 - **Shared context:** `docs/system-design.md §7` (observability)

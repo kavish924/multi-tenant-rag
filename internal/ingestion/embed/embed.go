@@ -10,7 +10,10 @@ import (
 	"math"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
+	"github.com/kavish924/multi-tenant-rag/internal/observability"
 )
 
 // ErrDimensionMismatch is permanent: the configured model and the schema
@@ -45,8 +48,12 @@ func (b *Batcher) Embed(ctx context.Context, texts []string) ([][]float32, error
 	out := make([][]float32, 0, len(texts))
 	for start := 0; start < len(texts); start += size {
 		batch := texts[start:min(start+size, len(texts))]
-		vecs, err := b.embedBatch(ctx, batch)
+		bctx, span := observability.Start(ctx, "embed batch",
+			observability.AttrProvider.String(b.Provider.Model()), attribute.Int("batch.size", len(batch)))
+		vecs, err := b.embedBatch(bctx, batch)
+		observability.End(span, err)
 		if err != nil {
+			observability.M().ProviderError(ctx, b.Provider.Model(), "embed")
 			return nil, err
 		}
 		if len(vecs) != len(batch) {

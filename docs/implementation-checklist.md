@@ -141,11 +141,11 @@ pulled forward here.
 
 - [ ] Specs 010–011 **Approved**
 - [ ] **[010 Observability](../specs/010-observability/tasks.md)**
-  - [ ] OTel setup; collector sidecar → Cloud Trace + Managed Prometheus (1.1)
-  - [ ] Request ids; trace context carried through job payloads (1.2–1.3)
-  - [ ] Query and ingestion spans; metrics with the label allowlist + CI lint (Group 2)
-  - [ ] slog JSON with Cloud Logging trace fields; no-document-text log scan (3.1)
-  - [ ] Cloud Monitoring dashboards in Terraform; collector-down resilience (3.2–3.3)
+  - [ ] OTel setup; collector sidecar → Cloud Trace + Managed Prometheus (1.1) *(code + Terraform written; not applied)*
+  - [x] Request ids; trace context carried through job payloads (1.2–1.3)
+  - [x] Query and ingestion spans; metrics with the label allowlist + CI lint (Group 2)
+  - [x] slog JSON with Cloud Logging trace fields; no-document-text log scan (3.1)
+  - [ ] Cloud Monitoring dashboards in Terraform; collector-down resilience (3.2–3.3) *(dashboard written, not applied; resilience test passes)*
 - [ ] **[011 Quotas & cost control](../specs/011-quotas-cost-control/tasks.md)**
   - [ ] Quota tables + limiter (Group 1)
   - [ ] Ask / upload / worker gates; reconciliation from `usage_events` (Group 2)

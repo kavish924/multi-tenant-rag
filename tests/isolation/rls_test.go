@@ -25,6 +25,7 @@ import (
 // (006) and sweep_candidates (013) in the same migration review that adds them.
 var systemFunctions = []string{
 	"claim_job(text,interval,text[])",
+	"job_queue_stats()",
 	"memberships_for_user(uuid)",
 	"outbox_mark_failed(bigint,text,integer)",
 	"outbox_mark_published(bigint)",
