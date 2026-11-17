@@ -13,11 +13,13 @@ import (
 
 	"github.com/kavish924/multi-tenant-rag/internal/api"
 	"github.com/kavish924/multi-tenant-rag/internal/auth"
+	"github.com/kavish924/multi-tenant-rag/internal/breaker"
 	"github.com/kavish924/multi-tenant-rag/internal/config"
 	"github.com/kavish924/multi-tenant-rag/internal/conversations"
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
 	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
@@ -67,16 +69,25 @@ func run(log *slog.Logger) error {
 
 	// Questions must be embedded by the same provider as ingestion
 	// (cmd/worker): llm.Fake until the Vertex AI provider lands.
-	var embedder llm.EmbeddingProvider = llm.Fake{}
+	// Each provider sits behind its own circuit breaker (QTA-REQ-005).
+	qc := cfg.Quotas
+	var embedder llm.EmbeddingProvider = breaker.Embedder{
+		EmbeddingProvider: llm.Fake{}, B: breaker.New("embed", qc.BreakerThreshold, qc.BreakerOpenFor),
+	}
 	// Gemini on Vertex AI lands with the GCP work; until then a
 	// deterministic extractive fake answers from source 1.
-	var generator llm.Generator = llm.FakeGenerator{}
+	var generator llm.Generator = breaker.Generator{
+		Generator: llm.FakeGenerator{}, B: breaker.New("generate", qc.BreakerThreshold, qc.BreakerOpenFor),
+	}
+	limiter := quotas.New(store, quotas.FromConfig(qc.UploadsDay, qc.QuestionsDay, qc.EmbedTokensMonth,
+		qc.GenerateTokensMonth, qc.ConcurrentAsks, qc.ConcurrentJobs))
 	retriever := retrieval.NewHybrid(store, embedder, retrieval.Options{}, log)
 	recorder := usage.NewRecorder(store)
 	ask := &conversations.Handler{
 		Retriever:  retriever,
 		Generator:  generator,
 		Usage:      recorder,
+		Quotas:     limiter,
 		Rerank:     rerankStage(cfg.Rerank, generator, recorder, log),
 		EmbedModel: embedder.Model(),
 		Log:        log,
@@ -90,6 +101,7 @@ func run(log *slog.Logger) error {
 			Tenants:   tenants.NewService(store),
 			Documents: documents.NewService(store, objects, cfg.MaxUploadBytes),
 			Retriever: retriever,
+			Quotas:    limiter,
 			Ask:       http.HandlerFunc(ask.Ask),
 			Ready:     store.Ping,
 			Log:       log,

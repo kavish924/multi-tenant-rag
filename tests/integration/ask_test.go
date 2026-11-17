@@ -38,7 +38,7 @@ func ingestAll(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	p := &ingestion.Pipeline{Objects: objects, Extractor: inProcess{}, Embedder: &embed.Batcher{Provider: llm.Fake{}}}
-	q := jobs.NewQueue(env.Store, 0)
+	q := func() *jobs.Queue { q := jobs.NewQueue(env.Store, 0); q.SetTenantCap(1 << 20); return q }()
 	for {
 		j, err := q.Claim(ctx, "test", []string{ingestion.JobKind})
 		if err != nil {

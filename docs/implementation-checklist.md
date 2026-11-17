@@ -147,10 +147,10 @@ pulled forward here.
   - [x] slog JSON with Cloud Logging trace fields; no-document-text log scan (3.1)
   - [ ] Cloud Monitoring dashboards in Terraform; collector-down resilience (3.2–3.3) *(dashboard written, not applied; resilience test passes)*
 - [ ] **[011 Quotas & cost control](../specs/011-quotas-cost-control/tasks.md)**
-  - [ ] Quota tables + limiter (Group 1)
-  - [ ] Ask / upload / worker gates; reconciliation from `usage_events` (Group 2)
-  - [ ] Per-provider circuit breakers (Vertex `429` / `RESOURCE_EXHAUSTED`); usage endpoint; overrides (Group 3)
-  - [ ] Race, breaker-transition, and latency tests (Group 4)
+  - [x] Quota tables + limiter (Group 1)
+  - [x] Ask / upload / worker gates; reconciliation from `usage_events` (Group 2)
+  - [x] Per-provider circuit breakers (Vertex `429` / `RESOURCE_EXHAUSTED`); usage endpoint; overrides (Group 3)
+  - [ ] Race, breaker-transition, and latency tests (Group 4) *(breaker tests pass; race test written, not yet run; latency benchmark pending)*
 - [ ] Alert policies: queue age, job dead-letters, provider error rate, spend per tenant
 
 **Exit gate:** explain the latency and the failure of a real request from its telemetry alone

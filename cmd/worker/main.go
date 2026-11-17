@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kavish924/multi-tenant-rag/internal/breaker"
 	"github.com/kavish924/multi-tenant-rag/internal/config"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion"
 	"github.com/kavish924/multi-tenant-rag/internal/ingestion/embed"
@@ -24,6 +25,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
+	"github.com/kavish924/multi-tenant-rag/internal/usage"
 )
 
 func main() {
@@ -66,17 +68,24 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	var provider llm.EmbeddingProvider = llm.Fake{} // EMBEDDER=fake; Vertex AI lands with the GCP work
+	// EMBEDDER=fake; Vertex AI lands with the GCP work. An open circuit is a
+	// retryable error, so the job retry ladder is unchanged (QTA-REQ-005).
+	var provider llm.EmbeddingProvider = breaker.Embedder{
+		EmbeddingProvider: llm.Fake{},
+		B:                 breaker.New("embed", cfg.Quotas.BreakerThreshold, cfg.Quotas.BreakerOpenFor),
+	}
 	log.Info("embedding provider", "model", provider.Model(), "dim", provider.Dim())
 
 	pipeline := &ingestion.Pipeline{
 		Objects:   objects,
 		Extractor: &extract.Isolated{Command: helper},
 		Embedder:  &embed.Batcher{Provider: provider},
+		Usage:     usage.NewRecorder(store),
 		Log:       log,
 	}
 
 	queue := jobs.NewQueue(store, jobs.DefaultLease)
+	queue.SetTenantCap(int(cfg.Quotas.ConcurrentJobs)) // QTA-REQ-002 worker gate
 	// jobs_queue_depth / jobs_queue_age_seconds (OBS-REQ-004).
 	if err := observability.M().RegisterQueueGauges(queue.Stats); err != nil {
 		return err

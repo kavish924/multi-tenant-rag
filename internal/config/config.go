@@ -36,6 +36,7 @@ type API struct {
 	Objects        Objects
 	MaxUploadBytes int64
 	Rerank         Rerank
+	Quotas         Quotas
 }
 
 // Rerank configures the optional rerank stage (spec 009). It is per
@@ -109,6 +110,7 @@ func LoadObjects() (Objects, error) {
 type Worker struct {
 	DB          DB
 	Objects     Objects
+	Quotas      Quotas
 	Concurrency int
 	LogLevel    string
 }
@@ -123,7 +125,11 @@ func LoadWorker() (Worker, error) {
 	if err != nil {
 		return Worker{}, err
 	}
-	w := Worker{DB: db, Objects: objs, Concurrency: 4, LogLevel: env("LOG_LEVEL", "info")}
+	q, err := LoadQuotas()
+	if err != nil {
+		return Worker{}, err
+	}
+	w := Worker{DB: db, Objects: objs, Quotas: q, Concurrency: 4, LogLevel: env("LOG_LEVEL", "info")}
 	if v := os.Getenv("WORKER_CONCURRENCY"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > 64 {
@@ -197,6 +203,9 @@ func LoadAPI() (API, error) {
 		cfg.MaxUploadBytes = n
 	}
 	if cfg.Rerank, err = LoadRerank(); err != nil {
+		return API{}, err
+	}
+	if cfg.Quotas, err = LoadQuotas(); err != nil {
 		return API{}, err
 	}
 	return cfg, nil
@@ -273,4 +282,59 @@ func intEnv(key string, def, lo, hi int) (int, error) {
 		return 0, fmt.Errorf("config: %s must be %d..%d", key, lo, hi)
 	}
 	return n, nil
+}
+
+// Quotas are the platform quota defaults and breaker settings (spec 011).
+// Per-tenant overrides live in tenant_quotas, not here.
+type Quotas struct {
+	UploadsDay          int64 // QUOTA_UPLOADS_DAY (500)
+	QuestionsDay        int64 // QUOTA_QUESTIONS_DAY (1000)
+	EmbedTokensMonth    int64 // QUOTA_EMBED_TOKENS_MONTH (50M)
+	GenerateTokensMonth int64 // QUOTA_GENERATE_TOKENS_MONTH (20M)
+	ConcurrentAsks      int64 // QUOTA_CONCURRENT_ASKS (5)
+	ConcurrentJobs      int64 // QUOTA_CONCURRENT_JOBS (3)
+
+	BreakerThreshold int           // BREAKER_THRESHOLD (5 consecutive failures)
+	BreakerOpenFor   time.Duration // BREAKER_OPEN_FOR (30s)
+}
+
+// LoadQuotas reads quota defaults and breaker settings.
+func LoadQuotas() (Quotas, error) {
+	q := Quotas{
+		UploadsDay: 500, QuestionsDay: 1000,
+		EmbedTokensMonth: 50_000_000, GenerateTokensMonth: 20_000_000,
+		ConcurrentAsks: 5, ConcurrentJobs: 3,
+		BreakerThreshold: 5, BreakerOpenFor: 30 * time.Second,
+	}
+	for _, f := range []struct {
+		key string
+		dst *int64
+	}{
+		{"QUOTA_UPLOADS_DAY", &q.UploadsDay},
+		{"QUOTA_QUESTIONS_DAY", &q.QuestionsDay},
+		{"QUOTA_EMBED_TOKENS_MONTH", &q.EmbedTokensMonth},
+		{"QUOTA_GENERATE_TOKENS_MONTH", &q.GenerateTokensMonth},
+		{"QUOTA_CONCURRENT_ASKS", &q.ConcurrentAsks},
+		{"QUOTA_CONCURRENT_JOBS", &q.ConcurrentJobs},
+	} {
+		if v := os.Getenv(f.key); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				return Quotas{}, fmt.Errorf("config: %s must be a non-negative integer", f.key)
+			}
+			*f.dst = n
+		}
+	}
+	var err error
+	if q.BreakerThreshold, err = intEnv("BREAKER_THRESHOLD", q.BreakerThreshold, 1, 1000); err != nil {
+		return Quotas{}, err
+	}
+	if v := os.Getenv("BREAKER_OPEN_FOR"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 || d > 10*time.Minute {
+			return Quotas{}, errors.New("config: BREAKER_OPEN_FOR must be a duration in (0, 10m]")
+		}
+		q.BreakerOpenFor = d
+	}
+	return q, nil
 }

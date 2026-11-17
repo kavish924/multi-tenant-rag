@@ -1,7 +1,7 @@
 # 011 — Quotas & Cost Control: Requirements
 
 - **Spec ID:** 011 `QTA`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 4 — Observable production
 - **Depends on:** `specs/008-generation-citations` (usage recording), `010-observability`
 - **Shared context:** `docs/system-design.md §9` (excessive LLM spending), `§10` budget layer

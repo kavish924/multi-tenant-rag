@@ -93,7 +93,7 @@ Instead, expose each one as a narrow **system function**:
 
 | Function | Caller | Returns |
 | -------- | ------ | ------- |
-| `claim_job(worker_id, lease, kinds)` | `cmd/worker` | one claimed job of the given kinds (see §4) |
+| `claim_job(worker_id, lease, kinds, tenant_cap)` | `cmd/worker` | one claimed job of the given kinds, skipping tenants at their running-job cap (see §4, spec 011) |
 | `memberships_for_user(user_id)` | `cmd/api` auth middleware | `(tenant_id, role)` rows |
 | `outbox_next(limit)` / `outbox_mark_published(id)` / `outbox_mark_failed(id, error, max)` | `cmd/outbox-relay` | unpublished rows / ack / poison-row count |
 | `job_queue_stats()` | `cmd/worker` metrics | `(kind, depth, oldest_age_seconds)` |
@@ -209,8 +209,10 @@ claim jobs with a **lease** so abandoned work is recovered automatically.
 ### Claiming a job
 
 The claim searches across every tenant, so it runs as a system function (§1) rather than a
-plain query under RLS. The worker calls `SELECT * FROM claim_job($1, interval '60 seconds', $2)`,
-where `$2` is the list of job kinds it has handlers for, so a worker never claims work it cannot do.
+plain query under RLS. The worker calls `SELECT * FROM claim_job($1, interval '60 seconds', $2, $3)`,
+where `$2` is the list of job kinds it has handlers for, so a worker never claims work it cannot do,
+and `$3` is the default per-tenant running-job cap (spec 011; `tenant_quotas.concurrent_jobs`
+overrides it). The SQL below is the original 0004 version; `0010_quotas.sql` adds the cap.
 
 ```sql
 -- migrations/0004_jobs.sql  (owned by app_system; EXECUTE granted to app)

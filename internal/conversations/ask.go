@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kavish924/multi-tenant-rag/internal/breaker"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
 	"github.com/kavish924/multi-tenant-rag/internal/llm"
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
 	"github.com/kavish924/multi-tenant-rag/internal/reranking"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
@@ -35,6 +37,8 @@ type Handler struct {
 	// Rerank is the optional stage between fusion and prompt (009); nil or
 	// disabled passes the fused top-K straight through.
 	Rerank *reranking.Stage
+	// Quotas is the pre-provider gate (spec 011); nil disables quotas.
+	Quotas *quotas.Limiter
 	// EmbedModel names the question embedder for the embed usage row.
 	EmbedModel       string
 	TopK             int
@@ -80,6 +84,38 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context() // cancelled when the client disconnects (GEN-REQ-004)
 
+	// QTA-AC-006: an open provider circuit fails fast, before any spend.
+	if a, ok := h.Generator.(interface{ Available() error }); ok {
+		if err := a.Available(); err != nil {
+			providerUnavailable(w)
+			return
+		}
+	}
+	// QTA-REQ-002: the quota gate runs before retrieval, so a rejected ask
+	// never reaches the embedding or generation provider (QTA-AC-001/003/004).
+	streamed := false
+	if h.Quotas != nil {
+		adm, err := h.Quotas.AdmitAsk(ctx, m.TenantID, int64(llm.ApproxTokens(question)), h.projectedGenerateTokens(question))
+		var ex *quotas.Exceeded
+		if errors.As(err, &ex) {
+			log.InfoContext(ctx, "ask: quota rejection", "tenant_id", m.TenantID, "code", ex.Code)
+			quotas.WriteExceeded(w, ex)
+			return
+		}
+		if err != nil {
+			log.ErrorContext(ctx, "ask: quota check failed", "tenant_id", m.TenantID, "err", err)
+			httpx.Internal(w)
+			return
+		}
+		defer func() {
+			if streamed {
+				adm.Done(ctx)
+			} else {
+				adm.Abort(ctx) // failed before the stream opened: the question is refunded
+			}
+		}()
+	}
+
 	hits, err := h.Retriever.Search(ctx, m.TenantID, question, h.Rerank.Want(h.topK()))
 	if err != nil {
 		if errors.Is(err, retrieval.ErrEmptyQuestion) || errors.Is(err, retrieval.ErrQuestionTooLong) {
@@ -88,6 +124,10 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		}
 		if ctx.Err() != nil {
 			return // client gone; nothing to answer
+		}
+		if errors.Is(err, breaker.ErrOpen) {
+			providerUnavailable(w)
+			return
 		}
 		log.ErrorContext(ctx, "ask: retrieval failed", "tenant_id", m.TenantID, "err", err)
 		// GEN-AC-006: 502 before the stream opens.
@@ -110,6 +150,7 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	hd.Set("Cache-Control", "no-cache")
 	hd.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	streamed = true
 	fl.Flush()
 	send := func(event string, v any) bool {
 		if err := writeSSE(w, event, v); err != nil {
@@ -264,4 +305,26 @@ func (h *Handler) log() *slog.Logger {
 		return h.Log
 	}
 	return slog.Default()
+}
+
+// providerUnavailable is the fail-fast response while a circuit is open.
+func providerUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "30")
+	httpx.Error(w, http.StatusServiceUnavailable, "provider_unavailable",
+		"the AI provider is temporarily unavailable; please retry shortly")
+}
+
+// projectedGenerateTokens estimates one ask's generation spend before the
+// call (QTA-REQ-003): the question, the full context budget, the output
+// cap, and the listwise rerank prompt when reranking is on.
+func (h *Handler) projectedGenerateTokens(question string) int64 {
+	ctxTokens := h.MaxContextTokens
+	if ctxTokens <= 0 {
+		ctxTokens = DefaultMaxContextTokens
+	}
+	n := int64(llm.ApproxTokens(question) + ctxTokens + h.maxOutput())
+	if h.Rerank.Active() {
+		n += int64(h.Rerank.Want(h.topK()) * reranking.MaxPassageBytes / 4)
+	}
+	return n
 }

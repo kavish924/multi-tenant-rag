@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 )
 
@@ -67,7 +68,12 @@ func (r *Recorder) Record(ctx context.Context, e Event) error {
 			INSERT INTO usage_events (tenant_id, kind, model, input_tokens, output_tokens, outcome, request_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			e.TenantID, e.Kind, e.Model, max(e.InputTokens, 0), max(e.OutputTokens, 0), e.Outcome, reqID)
-		return err
+		if err != nil {
+			return err
+		}
+		// Token budgets are reconciled from actuals in the same transaction
+		// as the usage row, so counters and usage_events never drift (011).
+		return quotas.AddTokens(ctx, tx, e.TenantID, e.Kind, int64(max(e.InputTokens, 0)+max(e.OutputTokens, 0)), time.Now())
 	})
 	if err != nil {
 		return fmt.Errorf("usage: record: %w", err)

@@ -25,6 +25,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
 	"github.com/kavish924/multi-tenant-rag/internal/storage"
 	"github.com/kavish924/multi-tenant-rag/internal/storage/objectstore"
+	"github.com/kavish924/multi-tenant-rag/internal/usage"
 )
 
 // JobKind is the queue kind this pipeline handles.
@@ -55,6 +56,9 @@ type Pipeline struct {
 	Embedder  *embed.Batcher
 	Chunking  chunk.Options // zero = chunk.Defaults
 	Log       *slog.Logger
+	// Usage, when set, records the embedding tokens each ingest spends, so
+	// embed_tokens/month covers ingestion as well as questions (011).
+	Usage *usage.Recorder
 
 	// BeforeIndex, when set, runs just before the Index transaction takes
 	// the document row lock. Tests use it to schedule interleavings
@@ -188,6 +192,17 @@ func (p *Pipeline) run(ctx context.Context, tx jobs.TenantTx, tenantID, docID uu
 		texts[i] = c.Content
 	}
 	vecs, err := p.Embedder.Embed(ctx, texts)
+	if err == nil && p.Usage != nil {
+		tokens := 0
+		for _, c := range chunks {
+			tokens += c.TokenCount
+		}
+		if uerr := p.Usage.Record(ctx, usage.Event{
+			TenantID: tenantID, Kind: usage.KindEmbed, Model: p.Embedder.Provider.Model(), InputTokens: tokens,
+		}); uerr != nil {
+			p.log().ErrorContext(ctx, "record embed usage", "document_id", docID, "err", uerr)
+		}
+	}
 	switch {
 	case errors.Is(err, embed.ErrDimensionMismatch):
 		return 0, false, fail(ReasonDimensionMismatch, true, err)

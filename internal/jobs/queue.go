@@ -106,8 +106,25 @@ func Enqueue(ctx context.Context, tx pgx.Tx, p EnqueueParams) (id uuid.UUID, cre
 // Heartbeat, Complete and Fail run inside WithTenant(job.TenantID) and are
 // guarded by locked_by, so a worker whose lease was taken over cannot write.
 type Queue struct {
-	store *storage.Store
-	lease time.Duration
+	store     *storage.Store
+	lease     time.Duration
+	tenantCap int
+}
+
+// DefaultTenantConcurrency caps running jobs per tenant when the tenant has
+// no override (QTA-REQ-001: concurrent_worker_jobs_per_tenant = 3).
+const DefaultTenantConcurrency = 3
+
+// SetTenantCap sets the default per-tenant running-job cap claim_job
+// enforces (tenant_quotas.concurrent_jobs overrides it per tenant).
+func (q *Queue) SetTenantCap(n int) { q.tenantCap = n }
+
+// TenantCap is the default per-tenant running-job cap.
+func (q *Queue) TenantCap() int {
+	if q.tenantCap <= 0 {
+		return DefaultTenantConcurrency
+	}
+	return q.tenantCap
 }
 
 // NewQueue builds a queue; lease <= 0 uses DefaultLease.
@@ -129,8 +146,8 @@ func (q *Queue) Claim(ctx context.Context, workerID string, kinds []string) (*Jo
 	}
 	var j Job
 	err := q.store.Pool().QueryRow(ctx,
-		`SELECT id, tenant_id, kind, payload, attempts, max_attempts FROM claim_job($1, $2, $3)`,
-		workerID, q.lease, kinds).
+		`SELECT id, tenant_id, kind, payload, attempts, max_attempts FROM claim_job($1, $2, $3, $4)`,
+		workerID, q.lease, kinds, q.TenantCap()).
 		Scan(&j.ID, &j.TenantID, &j.Kind, &j.Payload, &j.Attempts, &j.MaxAttempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

@@ -82,7 +82,7 @@ steps:
       - |
         set -euo pipefail
         repo=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}
-        for bin in api worker outbox-relay migrate; do
+        for bin in api worker outbox-relay migrate quotactl; do
           docker build --build-arg BIN=$bin -t $repo/$bin:${COMMIT_SHA} .
           if [ "${_DEPLOY}" = "true" ]; then docker push $repo/$bin:${COMMIT_SHA}; fi
         done

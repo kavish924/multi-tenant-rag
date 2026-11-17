@@ -16,6 +16,7 @@ import (
 	"github.com/kavish924/multi-tenant-rag/internal/documents"
 	"github.com/kavish924/multi-tenant-rag/internal/httpx"
 	"github.com/kavish924/multi-tenant-rag/internal/observability"
+	"github.com/kavish924/multi-tenant-rag/internal/quotas"
 	"github.com/kavish924/multi-tenant-rag/internal/retrieval"
 	"github.com/kavish924/multi-tenant-rag/internal/tenants"
 )
@@ -28,6 +29,7 @@ type Deps struct {
 	Documents *documents.Service  // optional: document routes are mounted only when set
 	Retriever retrieval.Retriever // optional: POST /search is mounted only when set
 	Ask       http.Handler        // optional: POST /ask and POST /tenants/{tenant}/ask (spec 008)
+	Quotas    *quotas.Limiter     // optional: upload gate and GET /tenants/{tenant}/usage (spec 011)
 	Ready     func(context.Context) error
 	Log       *slog.Logger
 }
@@ -73,6 +75,9 @@ func New(d Deps) http.Handler {
 	}
 	if d.Retriever != nil {
 		mux.Handle("POST /search", tenantRoute(tenants.RoleMember, s.search))
+	}
+	if d.Quotas != nil {
+		mux.Handle("GET /tenants/{tenant}/usage", tenantRoute(tenants.RoleAdmin, s.usage))
 	}
 	if d.Ask != nil {
 		ask := d.Ask.ServeHTTP
