@@ -4,7 +4,7 @@ COMPOSE := docker compose -f deployments/compose.yaml
 DEV_DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/app?sslmode=disable
 APP_DATABASE_URL ?= postgres://app_dev:app_dev@localhost:5432/app?sslmode=disable
 
-.PHONY: tidy up down migrate dev-login test itest lint run-api
+.PHONY: tidy up down migrate dev-login test itest eval lint run-api
 
 tidy:            ## resolve modules and write go.sum
 	go mod tidy
@@ -28,6 +28,9 @@ test:            ## unit tests
 
 itest:           ## integration + isolation tests (testcontainers, needs Docker)
 	go test -race -tags integration -count=1 ./tests/... ./internal/...
+
+eval:            ## evaluation harness (spec 014) against DATABASE_URL (admin DSN); EVAL_FLAGS=--fast for the PR set
+	go run ./cmd/eval run $(EVAL_FLAGS)
 
 lint:
 	golangci-lint run ./...

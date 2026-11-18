@@ -1,0 +1,31 @@
+# Quality gate for cmd/eval (spec 014, EVA-REQ-007). A run fails when any
+# gated aggregate is outside its bound. Metrics with no value (for example
+# answer metrics without a judge) are reported as skipped, never failed.
+#
+# Calibration: these starting values are deliberately conservative because
+# the first runs use the deterministic fake embedder (llm.Fake, word
+# hashing), which cannot match synonyms. After the first green run, record
+# its report as the baseline (--baseline) and raise each bound to just
+# below the observed value; with the Vertex AI embedder, raise them again.
+
+min:
+  recall_at_8: 0.50
+  mrr: 0.40
+  ndcg_at_10: 0.40
+  citation_validity: 0.95
+  refusal_accuracy: 0.85
+  faithfulness: 4.0       # judge scale 1–5
+  correctness: 3.5        # judge scale 1–5
+  citation_support: 0.90
+
+max:
+  cross_tenant_leaks: 0   # any leak fails the build (spec 015)
+
+# Only meaningful with a real generation model: the fake generator always
+# answers from source 1, so it can neither decline out-of-scope questions
+# nor write graded prose. With generator=fake these are reported, not gated.
+requires_real_generator:
+  - refusal_accuracy
+  - faithfulness
+  - correctness
+  - citation_support

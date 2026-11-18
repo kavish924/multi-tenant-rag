@@ -60,3 +60,35 @@ zero leakage is itself an eval metric). Judge prompts contain fixture content on
 
 - Judge model choice + cost cap → **default:** same provider as generation, monthly judge budget
   flagged in config; spot-check protocol guards over-trust.
+
+## 11. As built
+
+- **Assets** (`tests/evaluation/`): 52 cases over `acme` (outdoor retailer) and `globex`
+  (software company handbook): 13 lexical, 14 semantic, 8 multi-hop, 9 out-of-scope, 8
+  cross-tenant probes; 12 tagged `fast`. Chunk ids are not stable, so labels are
+  `<tenant>/<file>#<ordinal>`; every corpus file is exactly one chunk, and
+  `TestLabelsMatchCorpus` runs the real extractor and chunker to prove each label exists.
+- **`internal/evaluation`** (pure Go, unit-tested with a fake `System`): `LoadCases` /
+  `Validate`, `RecallAtK` / `ReciprocalRank` / `NDCGAtK` (binary relevance), `Runner`,
+  `Aggregate`, `Judge` (rubric prompt, strict JSON, call budget, per-call timeout),
+  `LoadThresholds` / `Gate`, `Summary`, `ABTable`.
+- **`cmd/eval`** `run | ab | report`: migrates the database, creates a login role that is a
+  member of `app` only (so RLS applies), creates fresh tenants, ingests the corpus through the
+  real pipeline (isolated extractor helper: `cmd/eval` doubles as it), then per case runs real
+  hybrid search and the real `/ask` handler (guards included) through an in-process request,
+  parsing the SSE stream. Finally it purges the tenants with the 013 purge job and deletes
+  them. Exit 0 / 1 (gate failed) / 2 (harness error).
+- **Metrics:** citation validity = distinct `[n]` markers in the answer that resolved to a
+  citation of the case tenant's chunk; refusal accuracy = refusal cases declined with no
+  citations, other cases answered; `cross_tenant_leaks` = results or citations labelled with
+  another tenant (gated at 0). The judge also returns `citations_supported` (judge-assisted
+  support check).
+- **Gate:** `thresholds.yaml` has `min`, `max` and `requires_real_generator`. With the fake
+  generator, refusal and answer metrics are reported but not gated (the fake always answers
+  from source 1); skipped metrics (no judge, judge errors, budget exhausted) never fail the
+  gate. Starting thresholds are conservative for the fake embedder; calibrate after the first
+  run (`--baseline` adds Δ columns).
+- **Spot check:** the summary samples five judged cases for manual review; the protocol is in
+  `tests/evaluation/README.md`.
+- **CI:** `make eval`; Cloud Build step `eval` runs the fast set on its own database in the
+  pipeline's Postgres container; `_EVAL_SET=full` for the nightly trigger.

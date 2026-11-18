@@ -1,7 +1,7 @@
 # 014 — Evaluation Harness: Requirements
 
 - **Spec ID:** 014 `EVA`
-- **Status:** Draft
+- **Status:** In progress
 - **Milestone:** 5 — Release-quality capstone
 - **Depends on:** `specs/007`, `008`, `009`
 - **Shared context:** `docs/system-design.md §8` (evaluation)

@@ -117,7 +117,7 @@ pulled forward here.
 ## Milestone 3 — RAG end to end
 
 - [ ] Specs 007–009 and **014** **Approved** (the exit gate needs the golden dataset)
-- [ ] **Start early:** [014](../specs/014-evaluation/tasks.md) 1.1 — `golden.jsonl` (≥ 50 cases, 2+ tenants) + fixture corpus + thresholds
+- [x] **Start early:** [014](../specs/014-evaluation/tasks.md) 1.1 — `golden.jsonl` (≥ 50 cases, 2+ tenants) + fixture corpus + thresholds
 - [ ] **[007 Hybrid retrieval](../specs/007-hybrid-retrieval/tasks.md)**
   - [x] Hybrid query (`vector.sql` + `fulltext.sql` + `hydrate.sql`, RRF in Go), deleted-document filter, per-document cap (Group 1)
   - [ ] Iterative scan or over-fetch decision, tested with the **smallest tenant** (2.1) *(decided and coded; test not yet run)*
@@ -131,7 +131,7 @@ pulled forward here.
 - [ ] **[009 Reranking](../specs/009-reranking/tasks.md)** (optional stage, off by default)
   - [ ] Interface + implementation(s) + timeout / fail-open (Groups 1–2) *(all done in code; cross-encoder credentials pending GCP; usage DB test not yet run)*
   - [ ] Keep only if the A/B eval shows it earns its latency and cost (3.2)
-- [ ] [014](../specs/014-evaluation/tasks.md) harness core: run, retrieval metrics, judge, citations, refusals, gate (2.1–2.6)
+- [ ] [014](../specs/014-evaluation/tasks.md) harness core: run, retrieval metrics, judge, citations, refusals, gate (2.1–2.6) *(written and unit-tested; first run against a database pending)*
 
 **Exit gate:** the golden dataset shows measurable retrieval and answer quality (report artifact).
 
@@ -171,7 +171,7 @@ pulled forward here.
   - [x] Tenant purge; retention sweeper via `sweep_candidates` (Group 2)
   - [ ] All four interleaving tests; exclusion timing (Group 3) *(written, not yet run)*
   - [ ] Authz matrix, performance, red-team deletion-race pass (Group 4) *(authz and performance tests written, not yet run; red-team pass with 015)*
-- [ ] **[014 Evaluation](../specs/014-evaluation/tasks.md)** — remainder: A/B mode, judge-down mode, CI (fast set per PR, full nightly), first recorded tuning decision
+- [ ] **[014 Evaluation](../specs/014-evaluation/tasks.md)** — remainder: A/B mode, judge-down mode, CI (fast set per PR, full nightly), first recorded tuning decision *(A/B, judge-down and the PR fast set done; nightly trigger and the first decision pending GCP)*
 - [ ] **[015 Isolation & red team](../specs/015-isolation-redteam/tasks.md)**
   - [ ] Test project `<prefix>-test` provisioned; canary seeding; capture harness; target guard (Group 1)
   - [ ] Isolation suite on every PR (Group 2)
